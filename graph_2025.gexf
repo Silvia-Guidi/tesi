@@ -1,0 +1,446 @@
+<?xml version='1.0' encoding='utf-8'?>
+<gexf xmlns="http://www.gexf.net/1.2draft" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.gexf.net/1.2draft http://www.gexf.net/1.2draft/gexf.xsd" version="1.2">
+  <meta lastmodifieddate="2026-03-04">
+    <creator>NetworkX 3.6</creator>
+  </meta>
+  <graph defaultedgetype="directed" mode="static" name="">
+    <attributes mode="static" class="node">
+      <attribute id="0" title="latitude" type="double" />
+      <attribute id="1" title="longitude" type="double" />
+    </attributes>
+    <nodes>
+      <node id="AL" label="AL">
+        <attvalues>
+          <attvalue for="0" value="41.3" />
+          <attvalue for="1" value="19.8" />
+        </attvalues>
+      </node>
+      <node id="AM" label="AM">
+        <attvalues>
+          <attvalue for="0" value="40.1" />
+          <attvalue for="1" value="44.5" />
+        </attvalues>
+      </node>
+      <node id="AT" label="AT">
+        <attvalues>
+          <attvalue for="0" value="47.5" />
+          <attvalue for="1" value="14.5" />
+        </attvalues>
+      </node>
+      <node id="AZ" label="AZ">
+        <attvalues>
+          <attvalue for="0" value="40.2" />
+          <attvalue for="1" value="47.6" />
+        </attvalues>
+      </node>
+      <node id="BA" label="BA">
+        <attvalues>
+          <attvalue for="0" value="44.2" />
+          <attvalue for="1" value="17.8" />
+        </attvalues>
+      </node>
+      <node id="BE" label="BE">
+        <attvalues>
+          <attvalue for="0" value="50.5" />
+          <attvalue for="1" value="4.5" />
+        </attvalues>
+      </node>
+      <node id="BG" label="BG">
+        <attvalues>
+          <attvalue for="0" value="42.7" />
+          <attvalue for="1" value="25.5" />
+        </attvalues>
+      </node>
+      <node id="CH" label="CH">
+        <attvalues>
+          <attvalue for="0" value="46.8" />
+          <attvalue for="1" value="8.2" />
+        </attvalues>
+      </node>
+      <node id="CZ" label="CZ">
+        <attvalues>
+          <attvalue for="0" value="49.8" />
+          <attvalue for="1" value="15.5" />
+        </attvalues>
+      </node>
+      <node id="DE" label="DE">
+        <attvalues>
+          <attvalue for="0" value="51.2" />
+          <attvalue for="1" value="10.4" />
+        </attvalues>
+      </node>
+      <node id="DK" label="DK">
+        <attvalues>
+          <attvalue for="0" value="56.0" />
+          <attvalue for="1" value="10.0" />
+        </attvalues>
+      </node>
+      <node id="EE" label="EE">
+        <attvalues>
+          <attvalue for="0" value="58.6" />
+          <attvalue for="1" value="25.0" />
+        </attvalues>
+      </node>
+      <node id="ES" label="ES">
+        <attvalues>
+          <attvalue for="0" value="40.0" />
+          <attvalue for="1" value="-3.7" />
+        </attvalues>
+      </node>
+      <node id="FI" label="FI">
+        <attvalues>
+          <attvalue for="0" value="62.0" />
+          <attvalue for="1" value="26.0" />
+        </attvalues>
+      </node>
+      <node id="FR" label="FR">
+        <attvalues>
+          <attvalue for="0" value="46.2" />
+          <attvalue for="1" value="2.2" />
+        </attvalues>
+      </node>
+      <node id="GB" label="GB">
+        <attvalues>
+          <attvalue for="0" value="54.0" />
+          <attvalue for="1" value="-2.0" />
+        </attvalues>
+      </node>
+      <node id="GE" label="GE">
+        <attvalues>
+          <attvalue for="0" value="42.0" />
+          <attvalue for="1" value="43.5" />
+        </attvalues>
+      </node>
+      <node id="GR" label="GR">
+        <attvalues>
+          <attvalue for="0" value="39.0" />
+          <attvalue for="1" value="22.0" />
+        </attvalues>
+      </node>
+      <node id="HR" label="HR">
+        <attvalues>
+          <attvalue for="0" value="45.1" />
+          <attvalue for="1" value="15.2" />
+        </attvalues>
+      </node>
+      <node id="HU" label="HU">
+        <attvalues>
+          <attvalue for="0" value="47.2" />
+          <attvalue for="1" value="19.5" />
+        </attvalues>
+      </node>
+      <node id="IE" label="IE">
+        <attvalues>
+          <attvalue for="0" value="53.1" />
+          <attvalue for="1" value="-7.7" />
+        </attvalues>
+      </node>
+      <node id="IT" label="IT">
+        <attvalues>
+          <attvalue for="0" value="41.9" />
+          <attvalue for="1" value="12.6" />
+        </attvalues>
+      </node>
+      <node id="LT" label="LT">
+        <attvalues>
+          <attvalue for="0" value="55.2" />
+          <attvalue for="1" value="23.9" />
+        </attvalues>
+      </node>
+      <node id="LU" label="LU">
+        <attvalues>
+          <attvalue for="0" value="49.8" />
+          <attvalue for="1" value="6.1" />
+        </attvalues>
+      </node>
+      <node id="LV" label="LV">
+        <attvalues>
+          <attvalue for="0" value="56.9" />
+          <attvalue for="1" value="24.6" />
+        </attvalues>
+      </node>
+      <node id="MD" label="MD">
+        <attvalues>
+          <attvalue for="0" value="47.0" />
+          <attvalue for="1" value="28.9" />
+        </attvalues>
+      </node>
+      <node id="ME" label="ME">
+        <attvalues>
+          <attvalue for="0" value="42.7" />
+          <attvalue for="1" value="19.3" />
+        </attvalues>
+      </node>
+      <node id="MK" label="MK">
+        <attvalues>
+          <attvalue for="0" value="41.6" />
+          <attvalue for="1" value="21.7" />
+        </attvalues>
+      </node>
+      <node id="MT" label="MT">
+        <attvalues>
+          <attvalue for="0" value="35.9" />
+          <attvalue for="1" value="14.4" />
+        </attvalues>
+      </node>
+      <node id="NL" label="NL">
+        <attvalues>
+          <attvalue for="0" value="52.2" />
+          <attvalue for="1" value="5.3" />
+        </attvalues>
+      </node>
+      <node id="NO" label="NO">
+        <attvalues>
+          <attvalue for="0" value="60.5" />
+          <attvalue for="1" value="8.5" />
+        </attvalues>
+      </node>
+      <node id="PL" label="PL">
+        <attvalues>
+          <attvalue for="0" value="51.9" />
+          <attvalue for="1" value="19.1" />
+        </attvalues>
+      </node>
+      <node id="PT" label="PT">
+        <attvalues>
+          <attvalue for="0" value="39.4" />
+          <attvalue for="1" value="-8.2" />
+        </attvalues>
+      </node>
+      <node id="RO" label="RO">
+        <attvalues>
+          <attvalue for="0" value="45.9" />
+          <attvalue for="1" value="25.0" />
+        </attvalues>
+      </node>
+      <node id="RS" label="RS">
+        <attvalues>
+          <attvalue for="0" value="44.0" />
+          <attvalue for="1" value="21.0" />
+        </attvalues>
+      </node>
+      <node id="RU" label="RU">
+        <attvalues>
+          <attvalue for="0" value="55.7" />
+          <attvalue for="1" value="37.6" />
+        </attvalues>
+      </node>
+      <node id="SE" label="SE">
+        <attvalues>
+          <attvalue for="0" value="62.0" />
+          <attvalue for="1" value="15.0" />
+        </attvalues>
+      </node>
+      <node id="SI" label="SI">
+        <attvalues>
+          <attvalue for="0" value="46.1" />
+          <attvalue for="1" value="14.8" />
+        </attvalues>
+      </node>
+      <node id="SK" label="SK">
+        <attvalues>
+          <attvalue for="0" value="48.7" />
+          <attvalue for="1" value="19.1" />
+        </attvalues>
+      </node>
+      <node id="TR" label="TR">
+        <attvalues>
+          <attvalue for="0" value="39.0" />
+          <attvalue for="1" value="35.0" />
+        </attvalues>
+      </node>
+      <node id="UA" label="UA">
+        <attvalues>
+          <attvalue for="0" value="48.4" />
+          <attvalue for="1" value="31.2" />
+        </attvalues>
+      </node>
+      <node id="XK" label="XK">
+        <attvalues>
+          <attvalue for="0" value="42.6" />
+          <attvalue for="1" value="21.1" />
+        </attvalues>
+      </node>
+    </nodes>
+    <edges>
+      <edge source="AL" target="GR" id="0" />
+      <edge source="AL" target="ME" id="1" />
+      <edge source="AL" target="XK" id="2" />
+      <edge source="AM" target="GE" id="3" />
+      <edge source="AT" target="CH" id="4" />
+      <edge source="AT" target="CZ" id="5" />
+      <edge source="AT" target="DE" id="6" />
+      <edge source="AT" target="HU" id="7" />
+      <edge source="AT" target="IT" id="8" />
+      <edge source="AT" target="SI" id="9" />
+      <edge source="AZ" target="GE" id="10" />
+      <edge source="BA" target="HR" id="11" />
+      <edge source="BA" target="ME" id="12" />
+      <edge source="BA" target="RS" id="13" />
+      <edge source="BE" target="DE" id="14" />
+      <edge source="BE" target="FR" id="15" />
+      <edge source="BE" target="GB" id="16" />
+      <edge source="BE" target="LU" id="17" />
+      <edge source="BE" target="NL" id="18" />
+      <edge source="BG" target="GR" id="19" />
+      <edge source="BG" target="MK" id="20" />
+      <edge source="BG" target="RO" id="21" />
+      <edge source="BG" target="RS" id="22" />
+      <edge source="BG" target="TR" id="23" />
+      <edge source="CH" target="AT" id="24" />
+      <edge source="CH" target="DE" id="25" />
+      <edge source="CH" target="FR" id="26" />
+      <edge source="CH" target="IT" id="27" />
+      <edge source="CZ" target="AT" id="28" />
+      <edge source="CZ" target="DE" id="29" />
+      <edge source="CZ" target="PL" id="30" />
+      <edge source="CZ" target="SK" id="31" />
+      <edge source="DE" target="AT" id="32" />
+      <edge source="DE" target="BE" id="33" />
+      <edge source="DE" target="CH" id="34" />
+      <edge source="DE" target="CZ" id="35" />
+      <edge source="DE" target="DK" id="36" />
+      <edge source="DE" target="FR" id="37" />
+      <edge source="DE" target="LU" id="38" />
+      <edge source="DE" target="NL" id="39" />
+      <edge source="DE" target="NO" id="40" />
+      <edge source="DE" target="PL" id="41" />
+      <edge source="DE" target="SE" id="42" />
+      <edge source="DK" target="DE" id="43" />
+      <edge source="DK" target="GB" id="44" />
+      <edge source="DK" target="NL" id="45" />
+      <edge source="DK" target="NO" id="46" />
+      <edge source="DK" target="SE" id="47" />
+      <edge source="EE" target="FI" id="48" />
+      <edge source="EE" target="LV" id="49" />
+      <edge source="EE" target="RU" id="50" />
+      <edge source="ES" target="FR" id="51" />
+      <edge source="ES" target="PT" id="52" />
+      <edge source="FI" target="EE" id="53" />
+      <edge source="FI" target="NO" id="54" />
+      <edge source="FI" target="SE" id="55" />
+      <edge source="FI" target="RU" id="56" />
+      <edge source="FR" target="BE" id="57" />
+      <edge source="FR" target="CH" id="58" />
+      <edge source="FR" target="DE" id="59" />
+      <edge source="FR" target="ES" id="60" />
+      <edge source="FR" target="GB" id="61" />
+      <edge source="FR" target="IT" id="62" />
+      <edge source="GB" target="BE" id="63" />
+      <edge source="GB" target="DK" id="64" />
+      <edge source="GB" target="FR" id="65" />
+      <edge source="GB" target="IE" id="66" />
+      <edge source="GB" target="NL" id="67" />
+      <edge source="GB" target="NO" id="68" />
+      <edge source="GE" target="AM" id="69" />
+      <edge source="GE" target="AZ" id="70" />
+      <edge source="GE" target="RU" id="71" />
+      <edge source="GE" target="TR" id="72" />
+      <edge source="GR" target="AL" id="73" />
+      <edge source="GR" target="BG" id="74" />
+      <edge source="GR" target="IT" id="75" />
+      <edge source="GR" target="MK" id="76" />
+      <edge source="GR" target="TR" id="77" />
+      <edge source="HR" target="BA" id="78" />
+      <edge source="HR" target="HU" id="79" />
+      <edge source="HR" target="RS" id="80" />
+      <edge source="HR" target="SI" id="81" />
+      <edge source="HU" target="AT" id="82" />
+      <edge source="HU" target="HR" id="83" />
+      <edge source="HU" target="RO" id="84" />
+      <edge source="HU" target="RS" id="85" />
+      <edge source="HU" target="SI" id="86" />
+      <edge source="HU" target="SK" id="87" />
+      <edge source="HU" target="UA" id="88" />
+      <edge source="IE" target="GB" id="89" />
+      <edge source="IT" target="AT" id="90" />
+      <edge source="IT" target="CH" id="91" />
+      <edge source="IT" target="FR" id="92" />
+      <edge source="IT" target="GR" id="93" />
+      <edge source="IT" target="ME" id="94" />
+      <edge source="IT" target="MT" id="95" />
+      <edge source="IT" target="SI" id="96" />
+      <edge source="LT" target="LV" id="97" />
+      <edge source="LT" target="PL" id="98" />
+      <edge source="LT" target="SE" id="99" />
+      <edge source="LU" target="BE" id="100" />
+      <edge source="LU" target="DE" id="101" />
+      <edge source="LV" target="EE" id="102" />
+      <edge source="LV" target="LT" id="103" />
+      <edge source="LV" target="RU" id="104" />
+      <edge source="MD" target="RO" id="105" />
+      <edge source="MD" target="UA" id="106" />
+      <edge source="ME" target="AL" id="107" />
+      <edge source="ME" target="BA" id="108" />
+      <edge source="ME" target="IT" id="109" />
+      <edge source="ME" target="RS" id="110" />
+      <edge source="ME" target="XK" id="111" />
+      <edge source="MK" target="BG" id="112" />
+      <edge source="MK" target="GR" id="113" />
+      <edge source="MK" target="RS" id="114" />
+      <edge source="MK" target="XK" id="115" />
+      <edge source="MT" target="IT" id="116" />
+      <edge source="NL" target="BE" id="117" />
+      <edge source="NL" target="DE" id="118" />
+      <edge source="NL" target="DK" id="119" />
+      <edge source="NL" target="GB" id="120" />
+      <edge source="NL" target="NO" id="121" />
+      <edge source="NO" target="DE" id="122" />
+      <edge source="NO" target="DK" id="123" />
+      <edge source="NO" target="FI" id="124" />
+      <edge source="NO" target="GB" id="125" />
+      <edge source="NO" target="NL" id="126" />
+      <edge source="NO" target="SE" id="127" />
+      <edge source="PL" target="CZ" id="128" />
+      <edge source="PL" target="DE" id="129" />
+      <edge source="PL" target="LT" id="130" />
+      <edge source="PL" target="SE" id="131" />
+      <edge source="PL" target="SK" id="132" />
+      <edge source="PL" target="UA" id="133" />
+      <edge source="PT" target="ES" id="134" />
+      <edge source="RO" target="BG" id="135" />
+      <edge source="RO" target="HU" id="136" />
+      <edge source="RO" target="MD" id="137" />
+      <edge source="RO" target="RS" id="138" />
+      <edge source="RO" target="UA" id="139" />
+      <edge source="RS" target="BA" id="140" />
+      <edge source="RS" target="BG" id="141" />
+      <edge source="RS" target="HR" id="142" />
+      <edge source="RS" target="HU" id="143" />
+      <edge source="RS" target="ME" id="144" />
+      <edge source="RS" target="MK" id="145" />
+      <edge source="RS" target="RO" id="146" />
+      <edge source="RS" target="XK" id="147" />
+      <edge source="RU" target="EE" id="148" />
+      <edge source="RU" target="GE" id="149" />
+      <edge source="RU" target="LV" id="150" />
+      <edge source="RU" target="FI" id="151" />
+      <edge source="SE" target="DE" id="152" />
+      <edge source="SE" target="DK" id="153" />
+      <edge source="SE" target="FI" id="154" />
+      <edge source="SE" target="LT" id="155" />
+      <edge source="SE" target="NO" id="156" />
+      <edge source="SE" target="PL" id="157" />
+      <edge source="SI" target="AT" id="158" />
+      <edge source="SI" target="HR" id="159" />
+      <edge source="SI" target="HU" id="160" />
+      <edge source="SI" target="IT" id="161" />
+      <edge source="SK" target="CZ" id="162" />
+      <edge source="SK" target="HU" id="163" />
+      <edge source="SK" target="PL" id="164" />
+      <edge source="SK" target="UA" id="165" />
+      <edge source="TR" target="BG" id="166" />
+      <edge source="TR" target="GE" id="167" />
+      <edge source="TR" target="GR" id="168" />
+      <edge source="UA" target="HU" id="169" />
+      <edge source="UA" target="MD" id="170" />
+      <edge source="UA" target="PL" id="171" />
+      <edge source="UA" target="RO" id="172" />
+      <edge source="UA" target="SK" id="173" />
+      <edge source="XK" target="AL" id="174" />
+      <edge source="XK" target="ME" id="175" />
+      <edge source="XK" target="MK" id="176" />
+      <edge source="XK" target="RS" id="177" />
+    </edges>
+  </graph>
+</gexf>
