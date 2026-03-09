@@ -1,0 +1,27 @@
+priors:
+  minnesota:
+    pi_shrink: 0.04
+    lag_decay: 2
+    exog_weight: 10
+  
+  sigma_iw:
+    alpha_offset: 2
+    s_scale: 0.1
+
+  informed_bernoulli:
+    pi_bernoulli : 0.04
+
+  stochastic_volatility:
+    phi_a : 20
+    phi_b: 1.5
+
+    mu_0: 0
+    mu_var: 10
+
+    sigma_v: 0.02
+    sigma_s: 0.02
+
+  degrees_of_freedom:
+    min_nu: 2
+    max_nu: 40
+    initial_nu: 20
