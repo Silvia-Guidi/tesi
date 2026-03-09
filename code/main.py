@@ -5,7 +5,7 @@ import numpy as np
 import networkx as nx
 import time
 
-API_KEY = 'IL_TUO_TOKEN_QUI'
+API_KEY = '4d659eb6-bacc-4b41-91a2-00b068ebbca2'
 client = EntsoePandasClient(api_key=API_KEY)
 
 countries = [
