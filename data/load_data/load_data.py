@@ -5,9 +5,9 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 ALLOWED_AREA_CODES = {
-    "AT", "BA", "BE", "BG", "CH", "CY", "CZ", "DE",
-    "DK", "EE", "ES", "FI", "FR", "GB", "GE",
-    "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MD",
+    "AT", "BA", "BE", "BG", "CH", "CZ", "DE",
+    "DK", "EE", "ES", "FI", "FR", "GB",
+    "GR", "HR", "HU", "IE", "IT", "LT", "LV", "MD",
     "ME", "NL", "NO", "PL", "PT", "RO", "RS",
     "SE", "SI", "SK"
 }
