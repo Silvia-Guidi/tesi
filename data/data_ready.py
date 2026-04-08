@@ -96,7 +96,7 @@ def impute(df: pd.DataFrame, ffill_limit: int = 2) -> pd.DataFrame:
                   f"{info['n_blocks']} block, "
                   f"max {info['max_block_len']} consecutive days")
     else:
-        print("No resuidel Nan after ffill.")
+        print("No resuidual Nan after ffill.")
 
     return df_imputed, report
 
