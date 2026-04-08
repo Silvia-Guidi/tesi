@@ -3,7 +3,7 @@ import argparse
 import pandas as pd
 from pathlib import Path
 
-# ── configurazione ──────────────────────────────────────────────────────────
+# ── conf ──────────────────────────────────────────────────────────
 PRODUCTION_MAP = {
     "Solar": "Solar",
     "Wind Onshore": "Wind",
@@ -11,7 +11,7 @@ PRODUCTION_MAP = {
     "Hydro Run-of-river and poundage": "Hydro",
 }
 
-# Tiene solo questi codici paese (scarta sotto-zone come DE_50HzT, DE_Amprion ecc.)
+
 ALLOWED_AREA_CODES = {
     "AT", "BA", "BE", "BG", "CH", "CZ", "DE",
     "DK", "EE", "ES", "FI", "FR", "GB",
@@ -36,7 +36,6 @@ DTYPE = {
 
 
 def process_file(path: str, chunksize: int) -> pd.DataFrame:
-    """Legge un CSV in chunk e restituisce DataFrame aggregato per giorno."""
     chunks = []
     for chunk in pd.read_csv(
         path,
@@ -47,20 +46,20 @@ def process_file(path: str, chunksize: int) -> pd.DataFrame:
         chunksize=chunksize,
         low_memory=False,
     ):
-        # filtra solo i ProductionType che ci interessano
+        # filter ProductionType of interest
         mask = chunk["ProductionType"].isin(PRODUCTION_MAP)
         mask = mask & chunk["AreaMapCode"].isin(ALLOWED_AREA_CODES)
         chunk = chunk[mask].copy()
         if chunk.empty:
             continue
 
-        # mappa → tipo aggregato
+        # map → aggregate type 
         chunk["EnergyType"] = chunk["ProductionType"].map(PRODUCTION_MAP)
 
-        # estrai solo la data (giorno)
+        # exctract date
         chunk["Date"] = chunk["DateTime(UTC)"].dt.normalize()
 
-        # aggrega per giorno / paese / tipo
+        # agggregate per day / country / type
         agg = (
             chunk.groupby(["Date", "AreaMapCode", "EnergyType"], observed=True)[
                 "ActualGenerationOutput[MW]"
@@ -71,15 +70,14 @@ def process_file(path: str, chunksize: int) -> pd.DataFrame:
         chunks.append(agg)
 
     if not chunks:
-        print(f"  [!] Nessun dato utile in {path}")
+        print(f"  [!] No data in {path}")
         return pd.DataFrame()
 
     return pd.concat(chunks, ignore_index=True)
 
 
 def build_pivot(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggrega tutti i chunk e costruisce il pivot finale."""
-    # somma di nuovo (più chunk dello stesso giorno da file diversi)
+    # sum 
     df = (
         df.groupby(["Date", "AreaMapCode", "EnergyType"], observed=True)[
             "ActualGenerationOutput[MW]"
@@ -88,7 +86,7 @@ def build_pivot(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-    # crea colonna combinata  es. "AT_Solar"
+    # combined col creation
     df["Column"] = df["AreaMapCode"].astype(str) + "_" + df["EnergyType"]
 
     pivot = df.pivot_table(
@@ -101,7 +99,7 @@ def build_pivot(df: pd.DataFrame) -> pd.DataFrame:
     pivot.index.name = "Date"
     pivot.columns.name = None
 
-    # ordina colonne alfabeticamente
+    # alphabetical sort
     pivot = pivot.sort_index(axis=1)
     return pivot
 
@@ -111,7 +109,7 @@ def save_excel(pivot: pd.DataFrame, output_path: str) -> None:
         pivot.to_excel(writer, sheet_name="Energy Pivot")
         ws = writer.sheets["Energy Pivot"]
 
-        # formatta data colonna A
+        # format date col
         from openpyxl.styles import Font, PatternFill, Alignment
         from openpyxl.utils import get_column_letter
 
@@ -124,12 +122,12 @@ def save_excel(pivot: pd.DataFrame, output_path: str) -> None:
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center")
 
-        # larghezza colonne
+        # col width
         ws.column_dimensions["A"].width = 14
         for col_idx in range(2, ws.max_column + 1):
             ws.column_dimensions[get_column_letter(col_idx)].width = 18
 
-        # numero format per dati MW
+        # format number for dati MW
         for row in ws.iter_rows(min_row=2):
             row[0].font = cell_font  # data
             for cell in row[1:]:
@@ -139,13 +137,13 @@ def save_excel(pivot: pd.DataFrame, output_path: str) -> None:
         # freeze header
         ws.freeze_panes = "B2"
 
-    print(f"\n✅  Salvato: {output_path}")
+    print(f"\n✅  Saved: {output_path}")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Pivot CSV ENTSO-E for Solar/Wind/Hydro")
-    parser.add_argument("files", nargs="+", help="Uno o più file CSV")
+    parser.add_argument("files", nargs="+", help="One or more file CSV")
     parser.add_argument("-o", "--output", default="gen_data.xlsx")
     parser.add_argument("--no-excel", action="store_true")
     parser.add_argument("--chunksize", type=int, default=200_000)

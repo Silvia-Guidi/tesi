@@ -4,7 +4,7 @@ import argparse
 import pandas as pd
 from pathlib import Path
 
-# ── configurazione ──────────────────────────────────────────────────────────
+
 
 ALLOWED_AREA_CODES = {
     "AT", "BA", "BE", "BG", "CH", "CZ", "DE",
@@ -14,7 +14,7 @@ ALLOWED_AREA_CODES = {
     "SE", "SI", "SK"
 }
 
-# Colonne da leggere per ciascun file
+
 USECOLS_GEN = [
     "DateTime(UTC)",
     "AreaMapCode",
@@ -41,11 +41,7 @@ DTYPE_LOAD = {
 
 
 def process_gen_file(path: str, chunksize: int) -> pd.DataFrame:
-    """
-    Legge un CSV di Day-Ahead Aggregated Generation in chunk.
-    Restituisce DataFrame con colonne: Date, AreaMapCode, GenerationForecast[MW]
-    aggregato a livello giornaliero (somma delle ore).
-    """
+
     chunks = []
     for chunk in pd.read_csv(
         path,
@@ -56,15 +52,15 @@ def process_gen_file(path: str, chunksize: int) -> pd.DataFrame:
         chunksize=chunksize,
         low_memory=False,
     ):
-        # Filtra solo i paesi di interesse
+        # Filter countries
         chunk = chunk[chunk["AreaMapCode"].isin(ALLOWED_AREA_CODES)].copy()
         if chunk.empty:
             continue
 
-        # Estrai la data (normalizza a mezzanotte, scarta l'ora)
+        # Extract dates
         chunk["Date"] = chunk["DateTime(UTC)"].dt.normalize()
 
-        # Aggrega per giorno e paese: somma di tutte le ore del giorno
+        # Aggregate per day and country
         agg = (
             chunk.groupby(["Date", "AreaMapCode"], observed=True)["GenerationForecast[MW]"]
             .sum()
@@ -80,11 +76,7 @@ def process_gen_file(path: str, chunksize: int) -> pd.DataFrame:
 
 
 def process_load_file(path: str, chunksize: int) -> pd.DataFrame:
-    """
-    Legge un CSV di Day-Ahead Total Load Forecast in chunk.
-    Restituisce DataFrame con colonne: Date, AreaMapCode, TotalLoad[MW]
-    aggregato a livello giornaliero (somma delle ore).
-    """
+    
     chunks = []
     for chunk in pd.read_csv(
         path,
@@ -95,15 +87,15 @@ def process_load_file(path: str, chunksize: int) -> pd.DataFrame:
         chunksize=chunksize,
         low_memory=False,
     ):
-        # Filtra solo i paesi di interesse
+        # Filter country
         chunk = chunk[chunk["AreaMapCode"].isin(ALLOWED_AREA_CODES)].copy()
         if chunk.empty:
             continue
 
-        # Estrai la data (normalizza a mezzanotte, scarta l'ora)
+        # Exctract date
         chunk["Date"] = chunk["DateTime(UTC)"].dt.normalize()
 
-        # Aggrega per giorno e paese
+        # Aggregate per day and country
         agg = (
             chunk.groupby(["Date", "AreaMapCode"], observed=True)["TotalLoad[MW]"]
             .sum()
@@ -119,18 +111,9 @@ def process_load_file(path: str, chunksize: int) -> pd.DataFrame:
 
 
 def build_pivot(df_gen: pd.DataFrame, df_load: pd.DataFrame) -> pd.DataFrame:
-    """
-    Riceve i DataFrame aggregati di generation e load,
-    calcola il Reserve Margin per ogni (Date, Paese) e
-    costruisce il pivot finale con una colonna per paese.
+ 
 
-    Formula:
-        RM = (GenerationForecast - LoadForecast) / LoadForecast
-
-    Il risultato è adimensionale (es. 0.20 = 20% di margine).
-    """
-
-    # ── 1. Ri-aggrega (gestisce sovrapposizioni tra file diversi dello stesso mese)
+    # Aggregate dealing with overlaps
     df_gen = (
         df_gen.groupby(["Date", "AreaMapCode"], observed=True)["GenerationForecast[MW]"]
         .sum()
@@ -142,35 +125,35 @@ def build_pivot(df_gen: pd.DataFrame, df_load: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-    # ── 2. Join su (Date, AreaMapCode)
+    # Join on (Date, AreaMapCode)
     df = pd.merge(df_gen, df_load, on=["Date", "AreaMapCode"], how="inner")
 
     if df.empty:
         raise ValueError(
-            "Il merge tra generation e load è vuoto: "
-            "verifica che i file coprono lo stesso intervallo temporale e gli stessi paesi."
+            "Empty merge: "
+            "Verify that the file have the same time lag and the same countries"
         )
 
-    # ── 3. Calcolo Reserve Margin
-    # Evitiamo divisione per zero: se LoadForecast == 0 il risultato è NaN
+    # Computation Reserve Margin
+    # Avoin dividing per 0
     df["ReserveMargin"] = (
         (df["GenerationForecast[MW]"] - df["TotalLoad[MW]"])
         / df["TotalLoad[MW]"].replace(0, float("nan"))
     )
 
-    # ── 4. Costruisci il pivot: righe = Date, colonne = "AT_RM", "BE_RM", ...
+
     df["Column"] = df["AreaMapCode"].astype(str) + "_RM"
 
     pivot = df.pivot_table(
         index="Date",
         columns="Column",
         values="ReserveMargin",
-        aggfunc="mean",   # media nel caso (raro) di duplicati residui
+        aggfunc="mean",   # mean in case of residual duplicates
     )
     pivot.index.name = "Date"
     pivot.columns.name = None
 
-    # Ordina colonne alfabeticamente (coerente con gen_data)
+    # Alphabetical sort
     pivot = pivot.sort_index(axis=1)
     return pivot
 
@@ -187,23 +170,23 @@ def save_excel(pivot: pd.DataFrame, output_path: str) -> None:
         header_font = Font(bold=True, color="FFFFFF", name="Arial", size=10)
         cell_font   = Font(name="Arial", size=10)
 
-        # Formatta intestazione
+        # Format heading
         for cell in ws[1]:
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center")
 
-        # Larghezza colonne
+        # col width
         ws.column_dimensions["A"].width = 14
         for col_idx in range(2, ws.max_column + 1):
             ws.column_dimensions[get_column_letter(col_idx)].width = 14
 
-        # Formato percentuale per i valori di Reserve Margin
+        # percentage format
         for row in ws.iter_rows(min_row=2):
             row[0].font = cell_font
             for cell in row[1:]:
                 cell.font = cell_font
-                cell.number_format = "0.00%"   # es. 0.20 → "20.00%"
+                cell.number_format = "0.00%"   # eg. 0.20 → "20.00%"
 
         ws.freeze_panes = "B2"
 
@@ -248,7 +231,7 @@ def main():
     parser.add_argument("--chunksize", type=int, default=200_000)
     args = parser.parse_args()
 
-    # ── Leggi tutti i file generation
+    # ── read all file generation
     gen_files  = expand_paths(args.gen)
     load_files = expand_paths(args.load)
     all_gen = []
@@ -258,7 +241,7 @@ def main():
         if not df.empty:
             all_gen.append(df)
 
-    # ── Leggi tutti i file load
+    # read all file load
     all_load = []
     for path in load_files:
         print(f"→ Load read: {path}")

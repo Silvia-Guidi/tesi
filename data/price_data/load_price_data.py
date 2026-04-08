@@ -87,7 +87,7 @@ def save_excel(pivot: pd.DataFrame, output_path: str) -> None:
         pivot.to_excel(writer, sheet_name="Day-Ahead Prices")
         ws = writer.sheets["Day-Ahead Prices"]
 
-        # Styling (Match your previous blue theme)
+        # Styling 
         header_fill = PatternFill("solid", start_color="2D6A9F", end_color="2D6A9F")
         header_font = Font(bold=True, color="FFFFFF", name="Arial", size=10)
         cell_font = Font(name="Arial", size=10)
