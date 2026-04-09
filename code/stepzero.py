@@ -72,7 +72,6 @@ def initialize_model (
         n_lags_endo= p, n_lags_exo= 0
         hparams= hparams,
     )
-    
     # --- Minnesota prior for Γ: exogenous coefficients ---
     B_gamma, Omega_gamma = minnesota_prior(
         n_endo= 0,
