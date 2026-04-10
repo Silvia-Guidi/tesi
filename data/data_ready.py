@@ -166,6 +166,7 @@ X = pd.concat(exo_parts, axis=1)
 # Full dataset for inspection / debug
 df_full = pd.concat([Y, X], axis=1)
 df_full.to_excel(Path(__file__).parent / "df_full_check.xlsx")
+
 #Quality check
 
 print("\n" + "=" * 60)
@@ -204,3 +205,5 @@ print("=" * 60)
 print(f"  Y_np  : {Y_np.shape}   (T={T}, n={n} endo vars)")
 print(f"  X_np  : {X_np.shape}   (T={T}, k={k} exo vars)")
 
+np.save('data/Y.npy', Y_np)
+np.save('data/X.npy', X_np)
