@@ -19,6 +19,7 @@ OUTPUT:
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from scipy.interpolate import CubicSpline
 
 #import params
 
@@ -33,7 +34,7 @@ FILE_MAP = {
 
 # Countries to Inlude in the Analysis
 COUNTRIES = ["AT", "BA", "BE", "BG", "CH", "CZ", "DE",
-    "DK", "EE", "ES", "FI", "FR", "GB",
+    "DK", "EE", "ES", "FI", "FR",
     "GR", "HR", "HU", "IE", "IT", "LT", "LV", "MD",
     "ME", "NL", "NO", "PL", "PT", "RO", "RS",
     "SE", "SI", "SK"] 
@@ -71,10 +72,57 @@ def extract_columns(df: pd.DataFrame,
             print(f"  ⚠ Col '{col_name}' not found in {df.columns.tolist()}")
     return pd.DataFrame(selected)
 
-def impute(df: pd.DataFrame, ffill_limit: int = 2) -> pd.DataFrame:
-    df_imputed = df.ffill(limit=ffill_limit)
+def impute(
+    df: pd.DataFrame, 
+    ffill_limit     : int = 2,
+    spline_limit    : int = 7,
+    seasonal_limit  : int = 16
+    ) -> tuple[pd.DataFrame, dict]:
+    
+    """
+    Gap 1-2 days  →  ffill      
+    Gap 3-7 days  →  spline    
+    Gap 8-16 days →  seasonal 
+    Gap > 16 days →  NaN → report
+    """
+    
+    
+    df_imputed = df.copy()
+    
+    def gap_mask (s, max_len):
+        is_nan = s.isna()
+        block_id = (is_nan != is_nan.shift()).cumsum()
+        sizes = is_nan.astype(int).groupby(block_id).transform('sum')
+        return is_nan & (sizes <= max_len)
+    
+    df_imputed = df_imputed.ffill(limit = ffill_limit)
+    
+    for col in df_imputed.columns :
+        mask = gap_mask (df_imputed[col], spline_limit)
+        if not mask.any():
+            continue
+        observed = df_imputed[col].dropna()
+        if len(observed) < 4:
+            continue
+        x_obs = observed.index.astype('int64')//10**9
+        cs = CubicSpline(x_obs, observed.values, extrapolate = False)
+        x_fill = df_imputed.index[mask].astype('int64')//10**9
+        df_imputed.loc[mask, col] = cs(x_fill)
+        
+    for col in df_imputed.columns :
+        mask = gap_mask (df_imputed[col], seasonal_limit)
+        if not mask.any():
+            continue
+        dow_median = df_imputed[col].groupby(df_imputed.index.dayofweek).median()
+        seasonal = pd.Series(
+            df_imputed.index.dayofweek.map(dow_median).astype(float),
+            index = df_imputed.index
+        )
+        residual = df_imputed[col] - seasonal
+        res_filled = residual.interpolate(method='time', limit=seasonal_limit, limit_direction = 'forward')
+        df_imputed.loc[mask, col] = (res_filled + seasonal).loc[mask]
 
-    # Check NaN  (missing > ffill_limit days)
+    # reporting 
     report = {}
     for col in df_imputed.columns:
         nan_mask = df_imputed[col].isna()
@@ -100,6 +148,8 @@ def impute(df: pd.DataFrame, ffill_limit: int = 2) -> pd.DataFrame:
 
     return df_imputed, report
 
+
+# Aggregation and implemention
 print("=" * 60)
 print("LOADING FILES")
 print("=" * 60)
@@ -163,25 +213,28 @@ exo_parts = [
 ]
 X = pd.concat(exo_parts, axis=1)
 
-# Full dataset for inspection / debug
-df_full = pd.concat([Y, X], axis=1)
-df_full.to_excel(Path(__file__).parent / "df_full_check.xlsx")
-
 #Quality check
 
 print("\n" + "=" * 60)
 print("QUALITY CHECK")
 print("=" * 60)
 print(f"\nY  — shape: {Y.shape}")
-print(f"     col: {Y.columns.tolist()}")
 print(f"     NaN tot: {Y.isna().sum().sum()}")
 
 print(f"\nX  — shape: {X.shape}")
-print(f"     col: {X.columns.tolist()}")
 print(f"     NaN tot: {X.isna().sum().sum()}")
 
 Y, report_Y = impute(Y)
 X, report_X = impute(X)
+
+col_to_drop = ['IE_Solar', 'ME_Solar', 'NL_Hydro', 'MD_RM']
+X = X.drop(columns = col_to_drop)
+print(f"     NaN tot: {X.isna().sum().sum()}")
+
+# Full dataset for inspection / debug
+df_full = pd.concat([Y, X], axis=1)
+df_full.to_excel(Path(__file__).parent / "df_full_check.xlsx")
+
 
 # ARRAYS FOR GIBBS
 """

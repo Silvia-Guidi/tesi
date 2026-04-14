@@ -1,17 +1,25 @@
 import numpy as np
 
 
-def minnesota_prior(n_endo, n_exo, n_lags_endo, n_lags_exo, hparams):
+def minnesota_prior(n_endo, n_exo, n_lags_endo, n_lags_exo, hparams, selected_lags=None):
     pi_shrink = hparams['pi_shrink']      
     lag_decay = hparams['lag_decay']       
     exog_weight = hparams['exog_weight']   
     
+    # Validation
+    assert pi_shrink > 0,   "pi_shrink must be positive"
+    assert lag_decay > 0,   "lag_decay must be positive"
+    assert exog_weight > 0, "exog_weight must be positive"
+    
     total_coefs = (n_endo * n_lags_endo) + (n_exo * n_lags_exo)
     omega_diag = np.zeros(total_coefs)
     
+    if selected_lags is None:
+        selected_lags = list(range(1, n_lags_endo + 1))
+    
     # shrinkage endo - lag decay
-    for lag in range (1, n_lags_endo + 1):
-        idx = (lag - 1) * n_endo
+    for k, lag in enumerate(selected_lags):
+        idx = k * n_endo
         omega_diag[idx : idx + n_endo] = pi_shrink / (lag ** lag_decay)
         
     # shrinkage exo - lag decay scaled by exo_weight
@@ -27,6 +35,10 @@ def minnesota_prior(n_endo, n_exo, n_lags_endo, n_lags_exo, hparams):
 def inverse_wishart_prior(n_endo, hparams):
     alpha = n_endo+hparams['alpha_offset']
     S = np.diag(hparams['sigma2_ar1'])
+    
+    assert alpha > n_endo + 1, \
+        "alpha must be > n_endog + 1 for the IW distribution to have a finite mean"
+        
     return S, alpha
 
 
