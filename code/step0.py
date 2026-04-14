@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from numpy.linalg import lstsq
 from scipy.stats import invwishart
 from priors import (
@@ -39,7 +40,7 @@ def initialize_model (
     # 2. DATA MATRICES
     Y = y_raw[max_lag:, :]  #shape (T, ny)
     
-    X_endo = np.hstack([
+    Xendo = np.hstack([
         y_raw[max_lag - lag : T_full - lag, :]      #y_{t-1}, shape (T, ny)
         for lag in selected_lags
     ])      # shape (T, ny*n_lags)
@@ -94,9 +95,33 @@ def initialize_model (
     
     
     # 4. GRAPH INIT
-    G0 = np.zeros((ny, ny), dtype=int)
+    def expand_G0(G0_matrix: np.ndarray, n_vars: int = 2) -> np.ndarray:
+        n_countries = G0_matrix.shape[0]
+        ny = n_countries * n_vars
+        G0_expanded = np.zeros((ny, ny), dtype=int)
+        
+        for c1 in range(n_countries):
+            for c2 in range(n_countries):
+                
+                rows = slice(c1 * n_vars, (c1 + 1) * n_vars)
+                cols = slice(c2 * n_vars, (c2 + 1) * n_vars)
+                
+                if c1 == c2:
+                    block = np.ones((n_vars, n_vars), dtype=int)
+                    np.fill_diagonal(block, 0)
+                    G0_expanded[rows, cols] = block
+                elif G0_matrix[c1, c2] == 1: 
+                    G0_expanded[rows, cols] = np.ones((n_vars, n_vars), dtype=int)
+
+        return G0_expanded       
+        
+    G0_matrix = pd.read_csv ("data/netwrok_data/G0_matrix.csv", index_col=0
+                             ).values.astype(int)
     
-    G_Ph = [np.zeros((ny,ny), dtype = int) for _ in selected_lags]
+    G0_expanded = expand_G0(G0_matrix, n_vars=2)
+    
+    G0 = G0_expanded.copy()
+    G_Phi = [np.zeros((ny,ny), dtype = int) for _ in selected_lags]
     
     
     # 5. COEFF INIT
@@ -142,7 +167,9 @@ def initialize_model (
         'Xendo':            Xendo,
         
         # --- Graph structures ---
-        'G0':             G0,       
+        'G0':             G0, 
+        'G0_matrix':      G0_matrix,
+        'G0_expanded':    G0_expanded,      
         'G_Phi':          G_Phi,    
  
         # -- Structural coefficients ---
