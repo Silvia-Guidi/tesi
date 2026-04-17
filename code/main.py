@@ -10,8 +10,6 @@ from step1 import step1_sample_G0
 DATA_DIR    = Path("data") 
 NETWORK_DIR = Path("data/network_data")
 OUTPUT_DIR  = Path("outputs")
-DIAGNOSTICS_DIR = Path("notebooks")
-OUTPUT_DIR.mkdir(exist_ok=True)
  
 # Gibbs sampler settings
 N_ITER  = 5_000    # total iterations
@@ -118,14 +116,10 @@ def main ():
     print(f"[Init] ny={ny} variables, T={T} effective observations")
     print(f"[Init] G0_expanded active arcs: {state['G0_expanded'].sum()}")
     print()
+    np.save(OUTPUT_DIR / "G0_expanded.npy", state['G0_expanded'])
  
     # Pre-allocate storage 
     samples = allocate_storage(ny)
-    
-    diagnostics = {
-        'step1_accept_rate': np.full(N_ITER, np.nan),
-        'step1_log_score':   np.full(N_ITER, np.nan)
-    }
  
     #  GIBBS LOOP
     print(f"Running {N_ITER} iterations ({BURNIN} burn-in + {N_KEEP} kept)...")
@@ -133,9 +127,7 @@ def main ():
     for t in range(N_ITER):
  
         #  STEP 1: sample G0 (contemporaneous graph) 
-        diag1 = step1_sample_G0(state, rng)
-        diagnostics['step1_accept_rate'][t] = diag1['accept_rate']
-        diagnostics['step1_log_score'][t]   = diag1['log_score']
+        step1_sample_G0(state, rng)
  
         # ── STEP 2: sample G_Phi (lagged graph) ── TO BE ADDED
         # diag2 = step2_sample_GPhi(state, rng)
@@ -164,8 +156,6 @@ def main ():
             phase = "burn-in" if t < BURNIN else "sampling"
             print(
                 f"  Iter {t+1:>5}/{N_ITER}  [{phase}]  "
-                f"Step1 accept: {diag1['accept_rate']:.2f}  "
-                f"log-score: {diag1['log_score']:.1f}"
             )
  
     print("\nGibbs sampler complete.")
@@ -173,7 +163,6 @@ def main ():
  
     # ── SAVE OUTPUTS ──────────────────────────────────────────────────────────
     np.save(OUTPUT_DIR / "G0_samples.npy",  samples['G0'])
-    np.save(DIAGNOSTICS_DIR / "diagnostics.npy", diagnostics)
  
  
     print(f"\n[Output] Saved to {OUTPUT_DIR}/")
