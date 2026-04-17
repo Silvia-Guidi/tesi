@@ -35,6 +35,8 @@ def initialize_model (
     n_lags = len(selected_lags)
     max_lag = max(selected_lags)
     T = T_full - max_lag    # effective sample size
+    #nz = y_raw_exo.shape[1]        # number of exo vars
+    #n_lags_exo = n_lags 
     
     
     # 2. DATA MATRICES
@@ -115,7 +117,7 @@ def initialize_model (
 
         return G0_expanded       
         
-    G0_matrix = pd.read_csv ("data/netwrok_data/G0_matrix.csv", index_col=0
+    G0_matrix = pd.read_csv ("data/network_data/G0_matrix.csv", index_col=0
                              ).values.astype(int)
     
     G0_expanded = expand_G0(G0_matrix, n_vars=2)

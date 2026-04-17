@@ -3,6 +3,7 @@ from pathlib import Path
  
 from step0 import initialize_model
 from step1 import step1_sample_G0
+from step2 import step2_sample
 
 # --------------------------------------------------------
 # SETTINGS
@@ -67,7 +68,7 @@ def load_data() -> np.ndarray:
 # STORAGE
 # --------------------------------------------------------
 
-def allocate_storage(ny: int) -> dict:
+def allocate_storage(ny: int, n_lags: int) -> dict:
     """
     Pre-allocate arrays for all quantities to store after burn-in.
     """
@@ -76,7 +77,7 @@ def allocate_storage(ny: int) -> dict:
         'G0':           np.zeros((ny, ny, N_KEEP), dtype=int),
  
         # Step 2 — to be added
-        # 'G_Phi':      np.zeros((ny, ny, N_KEEP), dtype=int),
+        'G_Phi':      np.zeros((ny, ny, N_KEEP), dtype=int),
  
         # Step 3 — to be added
         # 'Sigma_u':    np.zeros((ny, ny, N_KEEP)),
@@ -113,13 +114,14 @@ def main ():
  
     ny = state['ny']
     T  = state['T']
+    n_lags = state['n_lags']
     print(f"[Init] ny={ny} variables, T={T} effective observations")
     print(f"[Init] G0_expanded active arcs: {state['G0_expanded'].sum()}")
     print()
     np.save(OUTPUT_DIR / "G0_expanded.npy", state['G0_expanded'])
  
     # Pre-allocate storage 
-    samples = allocate_storage(ny)
+    samples = allocate_storage(ny, n_lags)
  
     #  GIBBS LOOP
     print(f"Running {N_ITER} iterations ({BURNIN} burn-in + {N_KEEP} kept)...")
@@ -129,8 +131,8 @@ def main ():
         #  STEP 1: sample G0 (contemporaneous graph) 
         step1_sample_G0(state, rng)
  
-        # ── STEP 2: sample G_Phi (lagged graph) ── TO BE ADDED
-        # diag2 = step2_sample_GPhi(state, rng)
+        # ── STEP 2: sample G_Phi (lagged graph)
+        diag2 = step2_sample(state, rng)
  
         # ── STEP 3: sample Sigma_u ── TO BE ADDED
         # step3_sample_Sigma(state, rng)
@@ -148,6 +150,8 @@ def main ():
         if t >= BURNIN:
             k = t - BURNIN
             samples['G0'][:, :, k] = state['G0']
+            for s in range(n_lags):
+                samples['G_Phi'][:, :, s, k] = state['G_Phi'][s]
             # samples['Sigma_u'][:, :, k] = state['Sigma_u']   # uncomment when ready
             # samples['Phi'][:, :, k]     = state['Phi']        # uncomment when ready
  
@@ -156,13 +160,16 @@ def main ():
             phase = "burn-in" if t < BURNIN else "sampling"
             print(
                 f"  Iter {t+1:>5}/{N_ITER}  [{phase}]  "
-            )
+                f"S2 acc={diag2['accept_rate']:.2%}  "
+                f"n_active={diag2['n_active']}")
+            
  
     print("\nGibbs sampler complete.")
  
  
     # ── SAVE OUTPUTS ──────────────────────────────────────────────────────────
     np.save(OUTPUT_DIR / "G0_samples.npy",  samples['G0'])
+    np.save(OUTPUT_DIR / "G_Phi_samples.npy", samples['G_Phi'])
  
  
     print(f"\n[Output] Saved to {OUTPUT_DIR}/")
