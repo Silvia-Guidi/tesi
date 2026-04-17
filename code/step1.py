@@ -14,7 +14,7 @@ from math import lgamma
 #   Args:
 #      Y_i      : (T,)        response variable for node i
 #      Pa_i     : (T, k) or None   parent columns for node i
-#      alpha_BGe: float       BGe prior d.o.f. (ny + 2 by default)
+#      alpha_BGe: float  BGe prior d.o.f. (ny + 2 by default)
 #
 #    Returns:
 #      float — log BGe score for node i
