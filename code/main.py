@@ -120,7 +120,7 @@ def main ():
     print()
  
     # Pre-allocate storage 
-    samples     = allocate_storage(ny)
+    samples = allocate_storage(ny)
     
     diagnostics = {
         'step1_accept_rate': np.full(N_ITER, np.nan),
@@ -176,8 +176,8 @@ def main ():
     np.save(DIAGNOSTICS_DIR / "diagnostics.npy", diagnostics)
  
  
-    return samples,diagnostics, state
+    print(f"\n[Output] Saved to {OUTPUT_DIR}/")
  
  
 if __name__ == "__main__":
-    samples, diagnostics, state = main()
+    main()

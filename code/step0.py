@@ -12,7 +12,7 @@ from priors import (
 )
 
 #=============================================
-#This file builds every data structure that the Gibb Sampler steps will read
+# This file builds every data structure that the Gibb Sampler steps will read
 #=============================================
 
 
@@ -62,7 +62,7 @@ def initialize_model (
             residuals = y - y_lag @ a
             sigma2[i]= np.var(residuals)
             
-            return sigma2
+        return sigma2
     
     sigma2_ar1 = ar1_residual_variances(y_raw, max_lag)
     hparams['sigma2_ar1'] = sigma2_ar1
