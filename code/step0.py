@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from numpy.linalg import lstsq
 from scipy.stats import invwishart
 from priors import (
     minnesota_prior,
@@ -8,12 +7,14 @@ from priors import (
     bernoulli_prior,
     stochastic_volatility_prior,
     df_prior,
-    global_shrinkage_prior
+    global_shrinkage_prior, 
+    ar1_residual_variances
 )
 
 #=============================================
 # This file builds every data structure that the Gibb Sampler steps will read
 #=============================================
+
 
 
 
@@ -49,23 +50,6 @@ def initialize_model (
     
     
     #3. PRIORS
-    
-    def ar1_residual_variances(y_raw, max_lag):
-        """
-        Estimate resudial variance of a univariate AR(1) for each endo var
-        """
-        T_full, ny = y_raw.shape
-        sigma2 = np.zeros(ny)
-        
-        for i in range(ny):
-            y = y_raw[max_lag:, i]      # dep vars
-            y_lag = y_raw[max_lag -1 : -1, i].reshape(-1,1)  # one lag
-            a, _, _, _= lstsq(y_lag, y, rcond = None)
-            residuals = y - y_lag @ a
-            sigma2[i]= np.var(residuals)
-            
-        return sigma2
-    
     sigma2_ar1 = ar1_residual_variances(y_raw, max_lag)
     hparams['sigma2_ar1'] = sigma2_ar1
         
@@ -122,7 +106,7 @@ def initialize_model (
     
     G0_expanded = expand_G0(G0_matrix, n_vars=2)
     
-    G0 = G0_expanded.copy()
+    G0 = np.triu(G0_expanded, k=1).astype(int)
     G_Phi = [np.zeros((ny,ny), dtype = int) for _ in selected_lags]
     
     
@@ -131,7 +115,9 @@ def initialize_model (
     
     
     # 6. RESIDUAL COVARIANCE INIT
-    Sigma_u = invwishart.rvs(df=alpha_prior, scale=S_prior)
+    seed_init = int(rng.integers(0, 2**31 - 1))
+    Sigma_u = invwishart.rvs(df=alpha_prior, scale=S_prior, random_state=seed_init)
+    Sigma_u = 0.5 * (Sigma_u + Sigma_u.T)
     
     
     # 7. STOCHASTIC VOLATILITY INIT
@@ -166,7 +152,7 @@ def initialize_model (
         
         # --- Data ---
         'Y':                Y,
-        'Xendo':            Xendo,
+        'X_endo':            Xendo,
         
         # --- Graph structures ---
         'G0':             G0, 
@@ -200,8 +186,7 @@ def initialize_model (
         'mu_prior_sv':    mu_prior_sv,
         'sigma_prior_sv': sigma_prior_sv,
         'nu_prior':       nu_prior,
-        'lambda_prior':   lambda_prior,
-        'sigma2_ar1':     sigma2_ar1,
+        'lambda_prior':   lambda_prior
     }
  
     return state

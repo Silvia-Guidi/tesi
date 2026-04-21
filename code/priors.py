@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import lstsq
 
 
 def minnesota_prior(n_endo, n_exo, n_lags_endo, n_lags_exo, hparams, selected_lags=None):
@@ -50,8 +51,8 @@ def stochastic_volatility_prior(hparams):
     sv_params = hparams['stochastic_volatility']
     
     # --- validation ---
-    assert sv_params['phi_a'] == 20 and sv_params['phi_b'] == 1.5, \
-    "phi_h prior should be Beta(20, 1.5)"
+    assert sv_params['phi_a'] > 0 and sv_params['phi_b'] > 0, \
+    "phi_a and phi_b must be positive"
     # --- 
     
     # phi_h ~ Beta(a, b)
@@ -71,6 +72,23 @@ def stochastic_volatility_prior(hparams):
     }
     h_init = 0.0
     return phi_prior, mu_prior, sigma_prior, h_init
+
+def ar1_residual_variances(y_raw, max_lag):
+        """
+        Estimate resudial variance of a univariate AR(1) for each endo var
+        """
+        T_full, ny = y_raw.shape
+        sigma2 = np.zeros(ny)
+        
+        for i in range(ny):
+            y = y_raw[max_lag:, i]      # dep vars
+            y_lag = y_raw[max_lag -1 : -1, i].reshape(-1,1)  # one lag
+            X = np.column_stack([np.ones_like(y_lag), y_lag])  # intercept + lag
+            coef, _, _, _ = lstsq(X, y, rcond=None)
+            residuals = y - X @ coef
+            sigma2[i]= np.var(residuals)
+            
+        return sigma2
 
 
 def df_prior(hparams):

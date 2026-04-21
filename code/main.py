@@ -4,6 +4,7 @@ from pathlib import Path
 from step0 import initialize_model
 from step1 import step1_sample_G0
 from step2 import step2_sample
+from step3 import step3_sample
 
 # --------------------------------------------------------
 # SETTINGS
@@ -30,6 +31,7 @@ HPARAMS = {
  
     # Inverse-Wishart prior for Sigma_u
     'alpha_offset': 2,      # alpha = ny + alpha_offset
+    'S0_scale':     1.0, 
  
     # Bernoulli prior for graph edges
     'pi_bernoulli': 0.5,
@@ -74,13 +76,14 @@ def allocate_storage(ny: int, n_lags: int) -> dict:
     """
     return {
         # Step 1
-        'G0':           np.zeros((ny, ny, N_KEEP), dtype=int),
+        'G0': np.zeros((ny, ny, N_KEEP), dtype=int),
  
         # Step 2 — to be added
-        'G_Phi':      np.zeros((ny, ny, N_KEEP), dtype=int),
+        'G_Phi': np.zeros((ny, ny, N_KEEP), dtype=int),
  
         # Step 3 — to be added
-        # 'Sigma_u':    np.zeros((ny, ny, N_KEEP)),
+        'Sigma_u': np.zeros((ny, ny, N_KEEP)),
+        'logdet_Sigma': np.zeros (N_KEEP),
  
         # Step 4 — to be added
         # 'Phi':        np.zeros((ny, ny, N_KEEP)),
@@ -135,7 +138,7 @@ def main ():
         diag2 = step2_sample(state, rng)
  
         # ── STEP 3: sample Sigma_u ── TO BE ADDED
-        # step3_sample_Sigma(state, rng)
+        diag3 = step3_sample(state, rng)
  
         # ── STEP 4: sample Phi ── TO BE ADDED
         # step4_sample_Phi(state, rng)
@@ -152,7 +155,8 @@ def main ():
             samples['G0'][:, :, k] = state['G0']
             for s in range(n_lags):
                 samples['G_Phi'][:, :, s, k] = state['G_Phi'][s]
-            # samples['Sigma_u'][:, :, k] = state['Sigma_u']   # uncomment when ready
+            samples['Sigma_u'][:, :, k] = state['Sigma_u']
+            samples ['logdet_Sigma'][k] = diag3['lodget_Sigma']
             # samples['Phi'][:, :, k]     = state['Phi']        # uncomment when ready
  
         #  PROGRESS REPORT every 500 iterations 
@@ -161,15 +165,20 @@ def main ():
             print(
                 f"  Iter {t+1:>5}/{N_ITER}  [{phase}]  "
                 f"S2 acc={diag2['accept_rate']:.2%}  "
-                f"n_active={diag2['n_active']}")
+                f"n_active={diag2['n_active']}"
+                f"S3 logdet(Σ)={diag3['logdet_Sigma']:.2f}"
+                )
+            
             
  
     print("\nGibbs sampler complete.")
  
  
     # ── SAVE OUTPUTS ──────────────────────────────────────────────────────────
-    np.save(OUTPUT_DIR / "G0_samples.npy",  samples['G0'])
+    np.save(OUTPUT_DIR / "G0_samples.npy", samples['G0'])
     np.save(OUTPUT_DIR / "G_Phi_samples.npy", samples['G_Phi'])
+    np.save(OUTPUT_DIR / "Sigma_u_samples.npy", samples['Sigma_u'])
+    np.save(OUTPUT_DIR / "logdet_Sigma_samples.npy", samples['logdet_Sigma'])
  
  
     print(f"\n[Output] Saved to {OUTPUT_DIR}/")
