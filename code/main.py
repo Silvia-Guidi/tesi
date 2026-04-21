@@ -156,7 +156,7 @@ def main ():
             for s in range(n_lags):
                 samples['G_Phi'][:, :, s, k] = state['G_Phi'][s]
             samples['Sigma_u'][:, :, k] = state['Sigma_u']
-            samples ['logdet_Sigma'][k] = diag3['lodget_Sigma']
+            samples ['logdet_Sigma'][k] = diag3['logdet_Sigma']
             # samples['Phi'][:, :, k]     = state['Phi']        # uncomment when ready
  
         #  PROGRESS REPORT every 500 iterations 

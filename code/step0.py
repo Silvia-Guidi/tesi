@@ -43,7 +43,7 @@ def initialize_model (
     # 2. DATA MATRICES
     Y = y_raw[max_lag:, :]  #shape (T, ny)
     
-    Xendo = np.hstack([
+    X_endo = np.hstack([
         y_raw[max_lag - lag : T_full - lag, :]      #y_{t-1}, shape (T, ny)
         for lag in selected_lags
     ])      # shape (T, ny*n_lags)
@@ -106,7 +106,7 @@ def initialize_model (
     
     G0_expanded = expand_G0(G0_matrix, n_vars=2)
     
-    G0 = np.triu(G0_expanded, k=1).astype(int)
+    G0 = np.zeros((ny, ny), dtype=int)
     G_Phi = [np.zeros((ny,ny), dtype = int) for _ in selected_lags]
     
     
@@ -152,7 +152,7 @@ def initialize_model (
         
         # --- Data ---
         'Y':                Y,
-        'X_endo':            Xendo,
+        'X_endo':           X_endo,
         
         # --- Graph structures ---
         'G0':             G0, 

@@ -30,18 +30,18 @@ def all_eq_scores(G_C:       np.ndarray,   # (ny, (ny+nz)*n_lags)
 
 # ---
 
-def stack_design(Xendo: np.ndarray,
-                  Xexo:  np.ndarray | None,
+def stack_design(X_endo: np.ndarray,
+                  X_exo:  np.ndarray | None,
                   ny: int, nz: int, n_lags: int) -> np.ndarray:
-    if nz == 0 or Xexo is None:
-        return Xendo
+    if nz == 0 or X_exo is None:
+        return X_endo
  
-    T = Xendo.shape[0]
+    T = X_endo.shape[0]
     n = ny + nz
     X_reg = np.zeros((T, n * n_lags))
     for s in range(n_lags):
-        X_reg[:, s*n : s*n + ny]       = Xendo[:, s*ny : (s+1)*ny]
-        X_reg[:, s*n + ny : (s+1)*n]   = Xexo[:,  s*nz : (s+1)*nz]
+        X_reg[:, s*n : s*n + ny] = X_endo[:, s*ny : (s+1)*ny]
+        X_reg[:, s*n + ny : (s+1)*n] = X_exo[:,  s*nz : (s+1)*nz]
     return X_reg
 
 def stack_GC(G_Phi:   list,                 # list of n_lags matrices (ny, ny)
@@ -79,7 +79,7 @@ def step2_sample (state: dict,
     pi      = state['pi_bernoulli']
     
     # Build the stacked design matrix  X_reg  and the unified graph  G_C.
-    X_reg = stack_design(state['Xendo'], state.get('Xexo'), ny, nz, n_lags)
+    X_reg = stack_design(state['X_endo'], state.get('X_exo'), ny, nz, n_lags)
     G_C   = stack_GC(state['G_Phi'], state.get('G_Gamma'), ny, nz, n_lags)
  
     npar = G_C.shape[1]   # = (ny + nz) * n_lags

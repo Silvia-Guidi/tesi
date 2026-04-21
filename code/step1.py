@@ -101,34 +101,46 @@ def step1_sample_G0(state:     dict,
     # Random permutation avoids systematic update bias across variables.
     for i in rng.permutation(ny):
  
-        # topology constraint
-        active_allowed = np.where(
-            (G_curr[i, :] == 1) & (G0_expanded[i, :] == 1)
-        )[0]
- 
-        if len(active_allowed) == 0:
+        # --- Physical admissibility mask ---
+        allowed_j = np.where(G0_expanded[i, :] == 1)[0]
+
+        if len(allowed_j) == 0:
             continue
-        
-        # Proposal 
-        j  = int(rng.choice(active_allowed))
-        G_prop  = G_curr.copy()
-        G_prop[i, j]  = 0          # turn off arc j -> i
- 
-        n_proposals  += 1
- 
-        # Acyclicity safeguard
+
+        # Draw one candidate uniformly from the physically allowed arcs,
+        # regardless of whether j -> i is currently present or absent.
+        j = int(rng.choice(allowed_j))
+
+        G_prop = G_curr.copy()
+
+        # Kill the reverse edge first (paper, Algorithm 1, step 6):
+        # ensures that toggling j -> i cannot produce a 2-cycle i <-> j.
+        if G_prop[j, i] == 1:
+            G_prop[j, i] = 0
+
+        # Toggle the candidate arc: add if currently absent, remove if present.
+        G_prop[i, j] = 1 - G_prop[i, j]
+
+        n_proposals += 1
+
+        # Acyclicity safeguard for longer cycles (i -> ... -> j -> i).
         if not is_DAG(G_prop):
             continue
- 
-        # Bayes Factor
+
+        # --- Local Bayes factor on equation i ---
         parents_prop = np.where(G_prop[i, :] == 1)[0]
         Pa_prop      = Y[:, parents_prop] if len(parents_prop) > 0 else None
         new_score_i  = log_BGe(Y[:, i], Pa_prop, alpha_BGe)
- 
-        # log BF = likelihood ratio + prior ratio
-        log_BF = (new_score_i - scores_curr[i]) + np.log(1 - pi) - np.log(pi)
- 
-        # acceot / reject
+
+        # Prior ratio depends on the direction of the move:
+        #   delta = +1  -> arc added  -> prior ratio   pi / (1 - pi)
+        #   delta = -1  -> arc removed -> prior ratio  (1 - pi) / pi
+        delta = G_prop[i, j] - G_curr[i, j]
+        log_prior_ratio = delta * (np.log(pi) - np.log(1 - pi))
+
+        log_BF = (new_score_i - scores_curr[i]) + log_prior_ratio
+        
+        # accept / reject
         if np.log(rng.uniform()) < log_BF:
             G_curr         = G_prop
             scores_curr[i] = new_score_i
