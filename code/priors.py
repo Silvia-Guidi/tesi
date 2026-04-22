@@ -74,21 +74,27 @@ def stochastic_volatility_prior(hparams):
     return phi_prior, mu_prior, sigma_prior, h_init
 
 def ar1_residual_variances(y_raw, max_lag):
-        """
-        Estimate resudial variance of a univariate AR(1) for each endo var
-        """
-        T_full, ny = y_raw.shape
-        sigma2 = np.zeros(ny)
-        
-        for i in range(ny):
-            y = y_raw[max_lag:, i]      # dep vars
-            y_lag = y_raw[max_lag -1 : -1, i].reshape(-1,1)  # one lag
-            X = np.column_stack([np.ones_like(y_lag), y_lag])  # intercept + lag
-            coef, _, _, _ = lstsq(X, y, rcond=None)
-            residuals = y - X @ coef
-            sigma2[i]= np.var(residuals)
-            
-        return sigma2
+    """
+    Estimate resudial variance of a univariate AR(1) for each endo var
+    """
+    T_full, ny = y_raw.shape
+    # Dependent and lagged matrices (each column = one variable)
+    Y_dep = y_raw[max_lag:, :]                      # (T_eff, ny)
+    Y_lag = y_raw[max_lag - 1 : -1, :]              # (T_eff, ny)
+
+    # Per-variable univariate AR(1) with intercept, solved analytically:
+    # y_i = a_i + b_i * y_{i,-1} + eps_i.
+    # Closed-form OLS: no loop, no lstsq.
+    mean_dep = Y_dep.mean(axis=0)
+    mean_lag = Y_lag.mean(axis=0)
+    cov = ((Y_dep - mean_dep) * (Y_lag - mean_lag)).mean(axis=0)
+    var_lag = ((Y_lag - mean_lag) ** 2).mean(axis=0)
+
+    b = cov / var_lag
+    a = mean_dep - b * mean_lag
+
+    resid = Y_dep - (a + b * Y_lag)
+    return resid.var(axis=0)
 
 
 def df_prior(hparams):

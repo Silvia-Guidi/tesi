@@ -6,148 +6,169 @@ from math import lgamma
 # =============================================
 
 # ---
-# 1. BGe LOCAL SCORE 
-#   Given that variable i has these specific parents in the graph,
-#       how well does this parent set explain the data?
-#      The output is a single number (log-score): higher = better fit.
-
-#   Args:
-#      Y_i      : (T,)        response variable for node i
-#      Pa_i     : (T, k) or None   parent columns for node i
-#      alpha_BGe: float  BGe prior d.o.f. (ny + 2 by default)
-#
-#    Returns:
-#      float — log BGe score for node i
+# 1. BGe LOCAL SCORE
 # ---
+def log_BGe(S_post_D: np.ndarray,
+            alpha_post_half: float,
+            const_term: float) -> float:
+    _, logdet_post = np.linalg.slogdet(S_post_D)
+    return const_term - alpha_post_half * logdet_post
 
-def log_BGe (Y_i : np.ndarray,
-             Pa_i : np.ndarray | None,
-             alpha_BGe : float) -> float:
-    
-    # Local data block D = [Y_i | Pa_i],  shape (T, nd)
-    D = (Y_i.reshape(-1,1) 
-         if (Pa_i is None or Pa_i.size == 0) 
-         else np.column_stack([Y_i, Pa_i]) 
-    )
-    
-    T_obs, nd = D.shape
-    S0_D = np.eye(nd)       # diffues identity prior scale
-    S_post_D = S0_D + D.T @ D      # updated posterior scale (conjugate)
-    
-    # Multivariate log-gamma function
-    def log_mgamma (a : float, d : int) -> float:
-        return (d * (d-1) / 4) * np.log(np.pi) + sum(
-            lgamma(a - i / 2 ) for i in range (d)
-        )
-        
-    return float (
-        -(nd * T_obs / 2) * np.log(np.pi)
-        + log_mgamma((alpha_BGe + T_obs) / 2, nd)
-        - log_mgamma(alpha_BGe / 2, nd)
-        + (alpha_BGe / 2)           * np.linalg.slogdet(S0_D)[1]
-        - ((alpha_BGe + T_obs) / 2) * np.linalg.slogdet(S_post_D)[1]
-    )
-    
-    
+
 # ---
 # 2. ACYCLICITY CHECK
 #    Returns True if G is a DAG, False if any directed cycle exists.
-#---
-
-def is_DAG (G: np.ndarray) -> bool:
+#    Uses boolean reachability closure with early termination.
+# ---
+def is_DAG(G: np.ndarray) -> bool:
     ny = G.shape[0]
-    R = G.astype(float)
-    for _ in range (ny -1):
-        R = np.clip(R @ G + R, 0, 1)
-    return bool(np.all(np.diag(R)==0))
+
+    # Self-loop -> immediate cycle
+    if np.any(np.diag(G)):
+        return False
+
+    G_bool = G.astype(bool)
+    R = G_bool.copy()
+    for _ in range(ny - 1):
+        R_new = R | (R @ G_bool)
+        if np.any(np.diag(R_new)):
+            return False
+        if np.array_equal(R_new, R):
+            break
+        R = R_new
+    return True
 
 
 # ---
 # 3. CACHE: compute all per-variable BGe scores for a given graph
+#    Uses the pre-computed Gram matrix S_post_full and the tabulated
+#    BGe constants bge_const[nd].
 # ---
-
-def all_node_scores (G: np.ndarray, Y: np.ndarray, alpha_BGe: float) -> np.ndarray:
-    ny = Y.shape[1]
+def all_node_scores(G: np.ndarray,
+                    S_post_full: np.ndarray,
+                    alpha_post_half: float,
+                    bge_const: np.ndarray) -> np.ndarray:
+    ny = G.shape[0]
     scores = np.zeros(ny)
     for i in range(ny):
-        parents    = np.where(G[i, :] == 1)[0]
-        Pa_i       = Y[:, parents] if len(parents) > 0 else None
-        scores[i]  = log_BGe(Y[:, i], Pa_i, alpha_BGe)
+        parents = np.where(G[i, :] == 1)[0]
+        cols = (
+            np.concatenate(([i], parents))
+            if parents.size > 0
+            else np.array([i])
+        )
+        S_block = S_post_full[np.ix_(cols, cols)]
+        nd = S_block.shape[0]
+        scores[i] = log_BGe(S_block, alpha_post_half, bge_const[nd])
     return scores
 
-# --- 
+
+# ---
 # 4. MAIN FUNCTION
 # ---
-def step1_sample_G0(state:     dict,
-                    rng:       np.random.Generator,
+def step1_sample_G0(state: dict,
+                    rng: np.random.Generator,
                     alpha_BGe: float = None) -> dict:
- 
-    Y            = state['Y']               # (T, ny) — endogenous data
-    G_curr       = state['G0'].copy()       # current graph (copy to avoid aliasing)
-    G0_expanded  = state['G0_expanded']     # fixed structural prior (ny x ny)
-    pi           = state['pi_bernoulli']    # Bernoulli prior prob per allowed arc
- 
-    ny = Y.shape[1]
- 
+
+    Y           = state['Y']               # (T, ny) endogenous data
+    G_curr      = state['G0'].copy()       # current graph (defensive copy)
+    G0_expanded = state['G0_expanded']     # physical admissibility mask (ny x ny)
+    pi          = state['pi_bernoulli']    # Bernoulli prior prob per allowed arc
+
+    T_obs, ny = Y.shape
+
     if alpha_BGe is None:
-        alpha_BGe = float(ny + 2)   
- 
-    # Cache per-variable BGe scores for current graph
-    scores_curr = all_node_scores(G_curr, Y, alpha_BGe)
- 
+        alpha_BGe = float(ny + 2)
+
+    # --- Pre-compute BGe constants that depend only on nd ---
+    # nd ranges from 1 (response only) to ny (response + all others as parents).
+    log_pi          = np.log(np.pi)
+    alpha_half      = alpha_BGe / 2.0
+    alpha_post_half = (alpha_BGe + T_obs) / 2.0
+
+    def _log_mgamma(a: float, d: int) -> float:
+        return (d * (d - 1) / 4.0) * log_pi + sum(
+            lgamma(a - k / 2.0) for k in range(d)
+        )
+
+    bge_const = np.empty(ny + 1)
+    bge_const[0] = 0.0   # unused placeholder (nd >= 1 always)
+    for nd in range(1, ny + 1):
+        bge_const[nd] = (
+            -(nd * T_obs / 2.0) * log_pi
+            + _log_mgamma(alpha_post_half, nd)
+            - _log_mgamma(alpha_half, nd)
+        )
+
+    # --- Pre-compute Gram matrix once for fast BGe scoring ---
+    # Any sub-block S = I + D.T @ D for a candidate parent set is obtained
+    # by plain index slicing into S_post_full, avoiding T-sized matmuls.
+    S_post_full = np.eye(ny) + Y.T @ Y
+
+    # Cache per-variable BGe scores for the current graph
+    scores_curr = all_node_scores(G_curr, S_post_full, alpha_post_half, bge_const)
+
     n_accept    = 0
     n_proposals = 0
- 
-    # Random permutation avoids systematic update bias across variables.
-    for i in rng.permutation(ny):
- 
-        # --- Physical admissibility mask ---
-        allowed_j = np.where(G0_expanded[i, :] == 1)[0]
 
-        if len(allowed_j) == 0:
+    # Random permutation avoids systematic update bias across variables
+    for i in rng.permutation(ny):
+
+        # --- Physical admissibility mask ---
+        # Only arcs allowed by the physical network topology are proposable.
+        # Arcs outside the mask stay zero for the whole chain by construction.
+        allowed_j = np.where(G0_expanded[i, :] == 1)[0]
+        if allowed_j.size == 0:
             continue
 
-        # Draw one candidate uniformly from the physically allowed arcs,
-        # regardless of whether j -> i is currently present or absent.
         j = int(rng.choice(allowed_j))
 
-        G_prop = G_curr.copy()
+        # --- Flip in place, revert on reject ---
+        old_ij = G_curr[i, j]
+        old_ji = G_curr[j, i]
 
-        # Kill the reverse edge first (paper, Algorithm 1, step 6):
-        # ensures that toggling j -> i cannot produce a 2-cycle i <-> j.
-        if G_prop[j, i] == 1:
-            G_prop[j, i] = 0
-
-        # Toggle the candidate arc: add if currently absent, remove if present.
-        G_prop[i, j] = 1 - G_prop[i, j]
+        # 1) kill the reverse edge (paper, Algo 1, step 6) to avoid 2-cycles
+        # 2) toggle the candidate arc (add if absent, remove if present)
+        if old_ji == 1:
+            G_curr[j, i] = 0
+        G_curr[i, j] = 1 - old_ij
 
         n_proposals += 1
 
-        # Acyclicity safeguard for longer cycles (i -> ... -> j -> i).
-        if not is_DAG(G_prop):
+        # Acyclicity safeguard for longer cycles i -> ... -> j -> i
+        if not is_DAG(G_curr):
+            G_curr[i, j] = old_ij
+            G_curr[j, i] = old_ji
             continue
 
-        # --- Local Bayes factor on equation i ---
-        parents_prop = np.where(G_prop[i, :] == 1)[0]
-        Pa_prop      = Y[:, parents_prop] if len(parents_prop) > 0 else None
-        new_score_i  = log_BGe(Y[:, i], Pa_prop, alpha_BGe)
+        # --- Local Bayes factor on equation i (fast path) ---
+        parents_prop = np.where(G_curr[i, :] == 1)[0]
+        cols = (
+            np.concatenate(([i], parents_prop))
+            if parents_prop.size > 0
+            else np.array([i])
+        )
+        S_block     = S_post_full[np.ix_(cols, cols)]
+        nd          = S_block.shape[0]
+        new_score_i = log_BGe(S_block, alpha_post_half, bge_const[nd])
 
-        # Prior ratio depends on the direction of the move:
-        #   delta = +1  -> arc added  -> prior ratio   pi / (1 - pi)
-        #   delta = -1  -> arc removed -> prior ratio  (1 - pi) / pi
-        delta = G_prop[i, j] - G_curr[i, j]
+        # Prior ratio depends on direction of the move
+        delta           = G_curr[i, j] - old_ij         # +1 add, -1 remove
         log_prior_ratio = delta * (np.log(pi) - np.log(1 - pi))
 
         log_BF = (new_score_i - scores_curr[i]) + log_prior_ratio
-        
-        # accept / reject
+
+        # --- Accept / reject ---
         if np.log(rng.uniform()) < log_BF:
-            G_curr         = G_prop
             scores_curr[i] = new_score_i
             n_accept      += 1
- 
+        else:
+            # revert to the original state
+            G_curr[i, j] = old_ij
+            G_curr[j, i] = old_ji
+
     state['G0'] = G_curr
- 
+
     return {
         'accept_rate': n_accept / n_proposals if n_proposals > 0 else float('nan'),
         'log_score':   float(scores_curr.sum()),
