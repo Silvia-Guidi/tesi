@@ -98,7 +98,7 @@ def step2_sample(state: dict,
     npar = G_C.shape[1]   # = (ny + nz) * n_lags
 
     if alpha_BGe is None:
-        alpha_BGe = float(ny + 2)
+        alpha_BGe = float(1 + npar + 2)
 
     # --- Pre-compute BGe constants that depend only on nd ---
     # Max parent-set size for equation i is all lagged regressors: nd up to

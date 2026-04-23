@@ -21,7 +21,8 @@ from priors import (
 def initialize_model (
     y_raw: np.ndarray,
     selected_lags : list,
-    hparams: dict
+    hparams: dict, 
+    rng: np.random.Generator
 ) -> dict:
     """
     Build and return a dictionary that holds every model object

@@ -131,6 +131,7 @@ def main():
         y_raw         = y_raw,
         selected_lags = SELECTED_LAGS,
         hparams       = HPARAMS,
+        rng           = rng,
     )
 
     # Make hparams accessible to step3 (it reads state['hparams'])
