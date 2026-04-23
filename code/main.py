@@ -7,6 +7,7 @@ from step1 import step1_sample_G0
 from step2 import step2_sample
 from step3 import step3_sample
 from step4 import step4_sample_Phi
+from step6 import step6_sample_SV
 
 # --------------------------------------------------------
 # SETTINGS
@@ -95,10 +96,15 @@ def allocate_storage(ny: int, n_lags: int, T_eff: int) -> dict:
 
         # Phi
         'Phi': np.zeros((ny, ny, n_lags, N_KEEP), dtype=np.float32),
+        'phi_norm':    np.zeros(N_KEEP),
 
-        # Step 6 - to be added
-        # 'h':        np.zeros((T_eff, N_KEEP), dtype=np.float32),
-        # 'lambda_t': np.zeros((T_eff, N_KEEP), dtype=np.float32),
+        # Step 6: stochastic volatility + Student-t mixing
+        'h':            np.zeros((T_eff, N_KEEP), dtype=np.float32),
+        'lambda_t':     np.zeros((T_eff, N_KEEP), dtype=np.float32),
+        # Scalar AR(1) hyper-parameters: one value per kept iteration
+        'mu_h':         np.zeros(N_KEEP, dtype=np.float32),
+        'phi_h':        np.zeros(N_KEEP, dtype=np.float32),
+        'sigma_h2':     np.zeros(N_KEEP, dtype=np.float32),
     }
 
 
@@ -166,7 +172,7 @@ def main():
         # step5_sample_Gamma(state, rng)
 
         # STEP 6: sample h_t, lambda_t - TO BE ADDED
-        # step6_sample_SV(state, rng)
+        diag6 = step6_sample_SV(state, rng)
 
         # --- Store post-burn-in samples ---
         if t >= BURNIN:
@@ -176,6 +182,13 @@ def main():
             samples['G_Phi'][:, :, :, k]     = np.stack(state['G_Phi'], axis=-1)
             samples['Sigma_u'][:, :, k]      = state['Sigma_u']
             samples['logdet_Sigma'][k]       = diag3['logdet_Sigma']
+            samples['Phi'][:, :, :, k] = np.stack(state['Phi'], axis=-1)
+            samples['phi_norm'][k]     = diag4['phi_norm']
+            samples['h'][:, k]               = state['h']
+            samples['lambda_t'][:, k]        = state['lambda_t']
+            samples['mu_h'][k]               = state['mu_h']
+            samples['phi_h'][k]              = state['phi_h']
+            samples['sigma_h2'][k]           = state['sigma_h2']
             
 
         # --- Progress report every 500 iterations ---
@@ -190,6 +203,10 @@ def main():
                 f"logdet(Σ)={diag3['logdet_Sigma']:+.2f}  "
                 f"S4 |Φ|_F={diag4['phi_norm']:.3f}  "
                 f"S4 max|Φ|={diag4['phi_max_abs']:.3f}"
+                f"⟨h⟩={diag6['h_mean']:+.2f}  "
+                f"φ_h={diag6['phi_h']:.3f}  "
+                f"σ_h²={diag6['sigma_h2']:.4f}  "
+                f"⟨λ⟩={diag6['lambda_mean']:.2f}"
             )
 
         # --- Periodic checkpoint (only after burn-in, while we have real samples) ---
