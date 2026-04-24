@@ -30,8 +30,8 @@ SELECTED_LAGS = [1, 2, 3, 7]
 
 HPARAMS = {
     # Minnesota prior
-    'pi_shrink':   0.5,
-    'lag_decay':   1.0,
+    'pi_shrink':   0.05,
+    'lag_decay':   2.0,
     'exog_weight': 0.5,
 
     # Inverse-Wishart prior for Sigma_u
@@ -47,8 +47,8 @@ HPARAMS = {
         'phi_b':   1.5,
         'mu_0':    0.0,
         'mu_var':  10.0,
-        'sigma_v': 0.01,
-        'sigma_s': 0.01,
+        'sigma_v': 10.0,
+        'sigma_s': 0.1,
     },
 
     # Degrees-of-freedom prior for lambda_t

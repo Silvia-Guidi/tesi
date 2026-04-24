@@ -6,24 +6,82 @@ from math import lgamma
 # =============================================
 
 # ---
-# 1. BGe LOCAL SCORE
+# BGe LOCAL SCORE (ratio form)
+#
+# Ahelegbey-Billio-Casarin Eq A.3: the log marginal likelihood of a graph
+# factorises as a product of ratios across equations:
+#
+#    P(X | G) = prod_i [ P(X_{Y_i, pi_i}) / P(X_{pi_i}) ]
+#
+# Therefore the local score for equation i with parent set pi_i is:
+#
+#    score(i | pi_i) = log P(X_{Y_i, pi_i}) - log P(X_{pi_i})
+#
+# Computing only the numerator (as an earlier version did) adds a spurious
+# -T/2 * log(pi) term per included parent (~209 per edge for T=365), which
+# made every edge rejected regardless of data correlation. The denominator
+# cancels those terms and leaves a well-behaved log-Bayes factor.
+#
+# Marginal likelihood of a block D of size nd (Heckerman-Geiger 1995):
+#
+#    log P(X_D) = c(nd, alpha, T)
+#               + (alpha/2)        * log|S_0^{(D)}|
+#               - ((alpha+T)/2)    * log|S_post^{(D)}|
+#
+# with S_0 = c_0 * I (scaled identity prior, c_0 = alpha - ny - 1).
 # ---
-def log_BGe(S_post_D: np.ndarray,
-            alpha_post_half: float,
-            const_term: float) -> float:
+def log_marginal_block(S_post_D: np.ndarray,
+                       alpha_half: float,
+                       alpha_post_half: float,
+                       const_term: float,
+                       c_0: float) -> float:
+    """log P(X_D) for a single block D."""
+    nd = S_post_D.shape[0]
     _, logdet_post = np.linalg.slogdet(S_post_D)
-    return const_term - alpha_post_half * logdet_post
+    logdet_prior   = nd * np.log(c_0)
+    return const_term + alpha_half * logdet_prior - alpha_post_half * logdet_post
+
+
+def local_score(response: int,
+                parents: np.ndarray,
+                S_post_full: np.ndarray,
+                alpha_half: float,
+                alpha_post_half: float,
+                bge_const: np.ndarray,
+                c_0: float) -> float:
+    """
+    Local BGe score for equation `response` given `parents`:
+
+        log P(X_{response, parents}) - log P(X_{parents})
+    """
+    # Numerator: marginal over {response} U parents
+    if parents.size > 0:
+        num_cols = np.concatenate(([response], parents))
+    else:
+        num_cols = np.array([response])
+    S_num   = S_post_full[np.ix_(num_cols, num_cols)]
+    nd_num  = S_num.shape[0]
+    log_num = log_marginal_block(S_num, alpha_half, alpha_post_half,
+                                 bge_const[nd_num], c_0)
+
+    # Denominator: marginal over parents only (0 if no parents)
+    if parents.size == 0:
+        return log_num
+    S_den   = S_post_full[np.ix_(parents, parents)]
+    nd_den  = S_den.shape[0]
+    log_den = log_marginal_block(S_den, alpha_half, alpha_post_half,
+                                 bge_const[nd_den], c_0)
+
+    return log_num - log_den
 
 
 # ---
-# 2. ACYCLICITY CHECK
+# ACYCLICITY CHECK
 #    Returns True if G is a DAG, False if any directed cycle exists.
-#    Uses boolean reachability closure with early termination.
 # ---
 def is_DAG(G: np.ndarray) -> bool:
     ny = G.shape[0]
 
-    # Self-loop -> immediate cycle
     if np.any(np.diag(G)):
         return False
 
@@ -40,31 +98,26 @@ def is_DAG(G: np.ndarray) -> bool:
 
 
 # ---
-# 3. CACHE: compute all per-variable BGe scores for a given graph
-#    Uses the pre-computed Gram matrix S_post_full and the tabulated
-#    BGe constants bge_const[nd].
+# CACHE: compute all per-equation local scores for a given graph
 # ---
 def all_node_scores(G: np.ndarray,
                     S_post_full: np.ndarray,
+                    alpha_half: float,
                     alpha_post_half: float,
-                    bge_const: np.ndarray) -> np.ndarray:
+                    bge_const: np.ndarray,
+                    c_0: float) -> np.ndarray:
     ny = G.shape[0]
     scores = np.zeros(ny)
     for i in range(ny):
         parents = np.where(G[i, :] == 1)[0]
-        cols = (
-            np.concatenate(([i], parents))
-            if parents.size > 0
-            else np.array([i])
-        )
-        S_block = S_post_full[np.ix_(cols, cols)]
-        nd = S_block.shape[0]
-        scores[i] = log_BGe(S_block, alpha_post_half, bge_const[nd])
+        scores[i] = local_score(i, parents, S_post_full,
+                                alpha_half, alpha_post_half,
+                                bge_const, c_0)
     return scores
 
 
 # ---
-# 4. MAIN FUNCTION
+# MAIN FUNCTION
 # ---
 def step1_sample_G0(state: dict,
                     rng: np.random.Generator,
@@ -78,10 +131,17 @@ def step1_sample_G0(state: dict,
     T_obs, ny = Y.shape
 
     if alpha_BGe is None:
-        alpha_BGe = float(ny + 2)
+        # BGe prior strength. max(ny+2, T/4) ensures alpha > ny+1 (so c_0 > 0)
+        # and scales with T to avoid the posterior-too-concentrated regime
+        # when T ~ ny.
+        alpha_BGe = float(max(ny + 2, T_obs // 4))
+
+    # Prior scale: S_0 = c_0 * I with c_0 = alpha - ny - 1.
+    c_0 = alpha_BGe - ny - 1
+    if c_0 <= 0:
+        c_0 = 1.0
 
     # --- Pre-compute BGe constants that depend only on nd ---
-    # nd ranges from 1 (response only) to ny (response + all others as parents).
     log_pi          = np.log(np.pi)
     alpha_half      = alpha_BGe / 2.0
     alpha_post_half = (alpha_BGe + T_obs) / 2.0
@@ -92,7 +152,7 @@ def step1_sample_G0(state: dict,
         )
 
     bge_const = np.empty(ny + 1)
-    bge_const[0] = 0.0   # unused placeholder (nd >= 1 always)
+    bge_const[0] = 0.0   # unused (nd >= 1)
     for nd in range(1, ny + 1):
         bge_const[nd] = (
             -(nd * T_obs / 2.0) * log_pi
@@ -101,22 +161,19 @@ def step1_sample_G0(state: dict,
         )
 
     # --- Pre-compute Gram matrix once for fast BGe scoring ---
-    # Any sub-block S = I + D.T @ D for a candidate parent set is obtained
-    # by plain index slicing into S_post_full, avoiding T-sized matmuls.
-    S_post_full = np.eye(ny) + Y.T @ Y
+    S_post_full = c_0 * np.eye(ny) + Y.T @ Y
 
-    # Cache per-variable BGe scores for the current graph
-    scores_curr = all_node_scores(G_curr, S_post_full, alpha_post_half, bge_const)
+    # Cache per-equation local scores for the current graph
+    scores_curr = all_node_scores(G_curr, S_post_full,
+                                  alpha_half, alpha_post_half,
+                                  bge_const, c_0)
 
     n_accept    = 0
     n_proposals = 0
 
-    # Random permutation avoids systematic update bias across variables
     for i in rng.permutation(ny):
 
         # --- Physical admissibility mask ---
-        # Only arcs allowed by the physical network topology are proposable.
-        # Arcs outside the mask stay zero for the whole chain by construction.
         allowed_j = np.where(G0_expanded[i, :] == 1)[0]
         if allowed_j.size == 0:
             continue
@@ -127,30 +184,22 @@ def step1_sample_G0(state: dict,
         old_ij = G_curr[i, j]
         old_ji = G_curr[j, i]
 
-        # 1) kill the reverse edge (paper, Algo 1, step 6) to avoid 2-cycles
-        # 2) toggle the candidate arc (add if absent, remove if present)
         if old_ji == 1:
             G_curr[j, i] = 0
         G_curr[i, j] = 1 - old_ij
 
         n_proposals += 1
 
-        # Acyclicity safeguard for longer cycles i -> ... -> j -> i
         if not is_DAG(G_curr):
             G_curr[i, j] = old_ij
             G_curr[j, i] = old_ji
             continue
 
-        # --- Local Bayes factor on equation i (fast path) ---
+        # --- Local Bayes factor on equation i (ratio form) ---
         parents_prop = np.where(G_curr[i, :] == 1)[0]
-        cols = (
-            np.concatenate(([i], parents_prop))
-            if parents_prop.size > 0
-            else np.array([i])
-        )
-        S_block     = S_post_full[np.ix_(cols, cols)]
-        nd          = S_block.shape[0]
-        new_score_i = log_BGe(S_block, alpha_post_half, bge_const[nd])
+        new_score_i = local_score(i, parents_prop, S_post_full,
+                                  alpha_half, alpha_post_half,
+                                  bge_const, c_0)
 
         # Prior ratio depends on direction of the move
         delta           = G_curr[i, j] - old_ij         # +1 add, -1 remove
@@ -163,7 +212,6 @@ def step1_sample_G0(state: dict,
             scores_curr[i] = new_score_i
             n_accept      += 1
         else:
-            # revert to the original state
             G_curr[i, j] = old_ij
             G_curr[j, i] = old_ji
 

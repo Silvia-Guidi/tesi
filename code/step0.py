@@ -132,7 +132,11 @@ def initialize_model (
     
     # sigma_h2 : variance of log-vol innovations
     #            initialized to prior mean of IG: E[IG(shape,scale)] = scale/(shape-1)
-    sigma_h2 = sigma_prior_sv['scale'] / (sigma_prior_sv['shape'] - 1)
+    if sigma_prior_sv['shape'] > 1:
+        sigma_h2 = sigma_prior_sv['scale'] / (sigma_prior_sv['shape'] - 1)
+    else:
+        sigma_h2 = sigma_prior_sv['scale'] / (sigma_prior_sv['shape'] + 1)
+    assert sigma_h2 > 0, f"sigma_h2 must be positive, got {sigma_h2}"
     
     
     # 8. STUDENT-t MIXING VAR INIT

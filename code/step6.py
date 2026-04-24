@@ -45,7 +45,9 @@ def _sample_lambda(U: np.ndarray,
     shape = 0.5 * (nu + ny)
     scale = 0.5 * (nu + q_t)
     g = rng.standard_gamma(shape, size=T)
-    return scale / g
+    lam = scale / g
+    lam = np.minimum(lam, 1000.0)
+    return lam
 
 
 def _build_y_star(U: np.ndarray,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve, LinAlgError
+from scipy.stats import invwishart
 
 from priors import inverse_wishart_prior
 
@@ -8,40 +9,29 @@ from priors import inverse_wishart_prior
 # STEP 3: SAMPLE Sigma_u FROM ITS FULL CONDITIONAL
 # ==============================================
 
+
 # ---
-# Fast inverse-Wishart sampler via Bartlett decomposition.
-# Much faster than scipy.stats.invwishart.rvs for repeated single draws:
-# avoids scipy's per-call overhead and the full eigendecomposition of scale.
+# Inverse-Wishart sampler using scipy.stats.invwishart.
+#
+# Convention (matches scipy and the standard Bayesian-econometrics literature):
+#   Sigma ~ IW(df, scale)     E[Sigma] = scale / (df - p - 1)
+#
+# Historical note: an earlier in-house Bartlett implementation sampled
+# Sigma ~ IW(df, scale^{-1}) instead of IW(df, scale) because the matrix
+# returned by `solve(W, I)` inverts the scale matrix implicitly. That bug
+# caused Sigma_u to shrink by a factor ~ trace(scale)^{-2}, which in the
+# BGVAR with ny=56 produced trace(Sigma_u) ~ 0.017 instead of ~ 1.
 # ---
 def invwishart_sample(df: float,
                       scale: np.ndarray,
                       rng: np.random.Generator) -> np.ndarray:
     """
-    Draw Sigma ~ IW(df, scale) using the Bartlett decomposition trick.
+    Draw Sigma ~ IW(df, scale) with scipy.
 
-    Equivalent to scipy.stats.invwishart.rvs(df=df, scale=scale) but
-    roughly 3-5x faster in single-draw mode because it bypasses scipy's
-    overhead and uses a simple Cholesky + triangular-solve pipeline.
+    Convention: E[Sigma] = scale / (df - p - 1).
     """
-    p = scale.shape[0]
-
-    # Cholesky factor of the scale matrix: scale = L @ L.T
-    L = np.linalg.cholesky(scale)
-
-    # Build lower-triangular Bartlett matrix A:
-    #   diagonal    ~ sqrt(chi-squared with df - i d.o.f.)
-    #   below-diag  ~ standard normal
-    A = np.zeros((p, p))
-    for i in range(p):
-        A[i, i] = np.sqrt(rng.chisquare(df - i))
-    tril_rows, tril_cols = np.tril_indices(p, k=-1)
-    A[tril_rows, tril_cols] = rng.standard_normal(size=tril_rows.size)
-
-    # Wishart draw:  W = L A A' L'   with  W ~ Wishart(df, scale^{-1})^{-1}
-    # Inverse-Wishart(df, scale) sample is solve(W, I).
-    LA = L @ A
-    W  = LA @ LA.T
-    return np.linalg.solve(W, np.eye(p))
+    seed = int(rng.integers(0, 2**31 - 1))
+    return invwishart.rvs(df=df, scale=scale, random_state=seed)
 
 
 # ---
@@ -178,7 +168,7 @@ def step3_sample(state: dict, rng: np.random.Generator) -> dict:
     # Symmetrise for numerical safety (prevents Cholesky failures downstream)
     S_post = 0.5 * (S_post + S_post.T)
 
-    # --- Sample Sigma_u from IW(alpha_post, S_post) via Bartlett ---
+    # --- Sample Sigma_u from IW(alpha_post, S_post) ---
     Sigma_u = invwishart_sample(alpha_post, S_post, rng)
     Sigma_u = 0.5 * (Sigma_u + Sigma_u.T)
 
