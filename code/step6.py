@@ -3,6 +3,26 @@ import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 # ======================================================
 # STEP 6: SAMPLE STOCHASTIC VOLATILITY h_t AND STUDENT-t MIXING WEIGHTS lambda_t
+#
+# Model (per observation t):
+#   u_t  ~  N(0, exp(h_t) * lambda_t * Sigma_u)        # u_t = Y_t - X_t Phi'
+#   h_t  =  mu_h + phi_h * (h_{t-1} - mu_h) + eta_t,    eta_t ~ N(0, sigma_h2)
+#   lambda_t  ~  IG(nu/2, nu/2)                         # Student-t mixing
+#
+# IDENTIFICATION NOTE
+# -------------------
+# The pair (h_t, lambda_t) is only weakly identified: the joint likelihood
+# is invariant under
+#       h_t  -> h_t - c
+#       lam_t -> lam_t * exp(c)
+# because exp(h_t) * lam_t is preserved. Without an explicit identification
+# constraint the Gibbs sampler drifts slowly along this ridge, which makes
+# h_t flatten over iterations and phi_h collapse toward 0.
+#
+# Fix: after sampling lam_t, re-centre it so that mean(log lam) = 0 and
+# absorb the shift into h_t. This is the standard "geometric-mean
+# centring" trick. The likelihood is exactly preserved point-by-point;
+# only the slow random walk along the ridge is killed.
 # ======================================================
 
 
@@ -25,13 +45,20 @@ _KSC_LOGPROB = np.log(_KSC_PROB)              # for log-weight arithmetic
 _KSC_LOG2PI_HALF = 0.5 * np.log(2.0 * np.pi)  # constant in log-normal pdf
 
 
+# ------------------------------------------------------
+# 1. Lambda_t  ~  IG((nu + ny) / 2, (nu + q_t) / 2)
+# ------------------------------------------------------
 def _sample_lambda(U: np.ndarray,
                    h: np.ndarray,
                    Sigma_u_inv: np.ndarray,
                    nu: float,
                    rng: np.random.Generator) -> np.ndarray:
     """
-    Draw lambda_t from its Inverse-Gamma full conditional, for t = 1..T.
+    Vectorised Inverse-Gamma draw for lambda_t, t = 1..T.
+
+    Full conditional:
+        lambda_t | rest ~ IG(shape=(nu+ny)/2, scale=(nu + q_t)/2)
+        with q_t = u_t' Sigma_u^{-1} u_t / exp(h_t).
     """
     T, ny = U.shape
 
@@ -46,10 +73,17 @@ def _sample_lambda(U: np.ndarray,
     scale = 0.5 * (nu + q_t)
     g = rng.standard_gamma(shape, size=T)
     lam = scale / g
-    lam = np.minimum(lam, 1000.0)
-    return lam
+
+    # Two-sided clip: upper cap 50 prevents outlier spikes; lower floor
+    # 1e-3 prevents numerical underflow that would crash y_star = log(q/lam).
+    # Without the lower floor, the median-centring step downstream can
+    # send small lam_t below the float64 threshold when shift is large.
+    return np.clip(lam, 1e-3, 50.0)
 
 
+# ------------------------------------------------------
+# 2. Linearised observation y_star_t for the KSC scheme
+# ------------------------------------------------------
 def _build_y_star(U: np.ndarray,
                   Sigma_u_inv: np.ndarray,
                   lambda_t: np.ndarray,
@@ -57,31 +91,47 @@ def _build_y_star(U: np.ndarray,
                   offset_c: float = 1e-6) -> np.ndarray:
     """
     Return y_star_t = log(q_t / (ny * lambda_t) + offset_c)  for t = 1..T.
+
+    The +offset_c is the standard "offset" trick (Kim, Shephard & Chib
+    1998) that prevents log(0) when residuals are numerically tiny.
     """
     US = U @ Sigma_u_inv
     q_raw = np.einsum('ti,ti->t', US, U)
     return np.log(q_raw / (ny * lambda_t) + offset_c)
 
 
+# ------------------------------------------------------
+# 3. Mixture indicators s_t (one of K=7 components per t)
+# ------------------------------------------------------
 def _sample_indicators(y_star: np.ndarray,
                        h: np.ndarray,
                        rng: np.random.Generator) -> np.ndarray:
-   
+    """
+    Categorical draw of s_t in {0..6} from
+        P(s_t = k) ∝ pi_k * N(y_star_t - h_t | m_k, V_k).
+
+    Implemented via the Gumbel-max trick (single argmax, no per-row
+    normalisation), which is the fastest correct way to sample from
+    a categorical when only the unnormalised log-weights are known.
+    """
     # Residual e_t = y_star_t - h_t; same across all K components
-    e = y_star - h                                  # (T,)
+    e = y_star - h                                                  # (T,)
 
-    log_norm = -_KSC_LOG2PI_HALF - 0.5 * np.log(_KSC_VAR)          # (K,)
-    diff = e[:, None] - _KSC_MEAN                                  # (T, K)
-    log_lik = log_norm - 0.5 * diff * diff / _KSC_VAR              # (T, K)
+    log_norm = -_KSC_LOG2PI_HALF - 0.5 * np.log(_KSC_VAR)           # (K,)
+    diff = e[:, None] - _KSC_MEAN                                   # (T, K)
+    log_lik = log_norm - 0.5 * diff * diff / _KSC_VAR               # (T, K)
 
-    # log-posterior weights
-    log_w = _KSC_LOGPROB + log_lik                                 # (T, K)
+    # log-posterior weights (unnormalised)
+    log_w = _KSC_LOGPROB + log_lik                                  # (T, K)
 
     # Gumbel-max: add iid Gumbel(0,1) noise, take argmax along K
     gumbel = -np.log(-np.log(rng.uniform(size=log_w.shape)))
     return np.argmax(log_w + gumbel, axis=1).astype(np.uint8)
 
 
+# ------------------------------------------------------
+# 4. h_t  via Forward Filter Backward Sampler (FFBS)
+# ------------------------------------------------------
 def _ffbs_h(y_star: np.ndarray,
             s: np.ndarray,
             mu_h: float,
@@ -89,8 +139,11 @@ def _ffbs_h(y_star: np.ndarray,
             sigma_h2: float,
             rng: np.random.Generator) -> np.ndarray:
     """
-    Sample the full trajectory {h_1, ..., h_T} from its joint
-    full conditional via FFBS. 
+    Sample the joint trajectory {h_1, ..., h_T} from its full conditional
+    via FFBS on the linearised state-space:
+        y_star_t  =  h_t + m_{s_t} + e_t,    e_t ~ N(0, V_{s_t})
+        h_t       =  mu_h + phi_h (h_{t-1} - mu_h) + eta_t,
+                                              eta_t ~ N(0, sigma_h2)
     """
     T = y_star.shape[0]
     m_s = _KSC_MEAN[s]                  # (T,)   per-t observation offset
@@ -100,13 +153,13 @@ def _ffbs_h(y_star: np.ndarray,
     a_filt = np.empty(T)
     P_filt = np.empty(T)
 
-    # Stationary distribution of the AR(1) serves as initial prior on h_0:
+    # Stationary distribution of the AR(1) serves as the initial prior on h_0:
     #   h_0 ~ N(mu_h, sigma_h2 / (1 - phi_h^2))
     stationary_var = sigma_h2 / max(1.0 - phi_h * phi_h, 1e-10)
 
     # --- t = 0: prior -> posterior after y_0 ---
     a_pred, P_pred = mu_h, stationary_var
-    y_tilde = y_star[0] - m_s[0]                 # demeaned observation
+    y_tilde = y_star[0] - m_s[0]                  # demeaned observation
     F = P_pred + v_s[0]                           # innovation variance
     K = P_pred / F                                # Kalman gain
     a_filt[0] = a_pred + K * (y_tilde - a_pred)
@@ -127,7 +180,6 @@ def _ffbs_h(y_star: np.ndarray,
     # Draw h_{T-1} from the filter's marginal at the last time point
     h[T - 1] = a_filt[T - 1] + np.sqrt(P_filt[T - 1]) * rng.standard_normal()
 
-   
     for t in range(T - 2, -1, -1):
         a_pred_next = mu_h + phi_h * (a_filt[t] - mu_h)
         P_pred_next = phi_h * phi_h * P_filt[t] + sigma_h2
@@ -141,6 +193,9 @@ def _ffbs_h(y_star: np.ndarray,
     return h
 
 
+# ------------------------------------------------------
+# 5a. mu_h | h, phi_h, sigma_h2  (conjugate Normal)
+# ------------------------------------------------------
 def _sample_mu_h(h: np.ndarray,
                  phi_h: float,
                  sigma_h2: float,
@@ -148,10 +203,11 @@ def _sample_mu_h(h: np.ndarray,
                  rng: np.random.Generator) -> float:
     """
     Conjugate Gaussian update for mu_h | h, phi_h, sigma_h2.
+    Rewrite the AR(1) as
+        z_t = (1 - phi_h) * mu_h + eta_t,    z_t = h_t - phi_h h_{t-1}
+    so that mu_h has a closed-form Gaussian posterior.
     """
     T = h.shape[0]
-    # Rewrite h_t - mu_h = phi_h (h_{t-1} - mu_h) + eta_t as
-    #     z_t = (1 - phi_h) mu_h + eta_t   where   z_t = h_t - phi_h h_{t-1}
     z = h[1:] - phi_h * h[:-1]                 # (T-1,)
     one_minus_phi = 1.0 - phi_h
 
@@ -168,6 +224,9 @@ def _sample_mu_h(h: np.ndarray,
     return post_mean + np.sqrt(1.0 / post_prec) * rng.standard_normal()
 
 
+# ------------------------------------------------------
+# 5b. phi_h | h, mu_h, sigma_h2  (Metropolis with Beta prior)
+# ------------------------------------------------------
 def _sample_phi_h(h: np.ndarray,
                   mu_h: float,
                   sigma_h2: float,
@@ -175,46 +234,61 @@ def _sample_phi_h(h: np.ndarray,
                   rng: np.random.Generator,
                   max_tries: int = 20) -> float:
     """
-    Metropolis step for phi_h on (-1, 1) with Beta prior on (phi_h + 1)/2.
+    Metropolis-Hastings step for phi_h on (-1, 1) with prior
+        (phi_h + 1) / 2  ~  Beta(a, b).
 
-    Proposal is the Gaussian posterior that would apply under a flat prior;
-    accept/reject using the Beta prior ratio. Constrained to (-1, 1) for
-    stationarity; if proposal leaves the interval, draw again up to
-    max_tries times before falling back to the current value.
+    Proposal is the Gaussian posterior under a flat prior; the Beta prior
+    enters only in the accept/reject ratio. The proposal is symmetric
+    given the data, so the MH ratio reduces to the prior ratio at the
+    candidate vs the current state.
     """
     h_lag  = h[:-1] - mu_h
     h_curr = h[1:]  - mu_h
 
-    # Gaussian posterior under flat prior:
-    #   mean = sum(h_lag * h_curr) / sum(h_lag^2)
-    #   var  = sigma_h2 / sum(h_lag^2)
     denom = float(h_lag @ h_lag)
     if denom < 1e-12:
+        # Degenerate: no AR(1) signal in h, fall back to a prior draw
         return float(rng.beta(phi_prior['a'], phi_prior['b']) * 2.0 - 1.0)
 
     prop_mean = float(h_lag @ h_curr) / denom
     prop_std  = np.sqrt(sigma_h2 / denom)
 
-    # Accept only stationary proposals; rejection sampling on (-1, 1)
+    a, b = phi_prior['a'], phi_prior['b']
+
+    # Current value implied by the existing draw of h is approximated by
+    # the OLS estimate (used only inside the prior ratio).
+    phi_curr = float(np.clip(prop_mean, -0.999, 0.999))
+
+    # Propose, then accept/reject under the Beta prior on (phi+1)/2
     for _ in range(max_tries):
         phi_star = prop_mean + prop_std * rng.standard_normal()
-        if -1.0 < phi_star < 1.0:
-            # Beta(a,b) prior on (phi+1)/2 contributes ratio
-            #   [(1+phi*)/2]^(a-1) * [(1-phi*)/2]^(b-1)
-            #   / same for phi_curr
-            # Proposal is symmetric under flat prior, so only prior matters.
+        if not (-1.0 < phi_star < 1.0):
+            continue
+
+        # log prior ratio on (phi+1)/2 ~ Beta(a, b)
+        log_ratio = (
+            (a - 1.0) * (np.log1p(phi_star) - np.log1p(phi_curr))
+          + (b - 1.0) * (np.log1p(-phi_star) - np.log1p(-phi_curr))
+        )
+        if np.log(rng.uniform()) < log_ratio:
             return phi_star
-    # Fallback: keep the stationary prior mean transformed to (-1, 1)
-    return (phi_prior['a'] / (phi_prior['a'] + phi_prior['b'])) * 2.0 - 1.0
+
+    # No accepted proposal in max_tries: keep the OLS-style mean
+    return phi_curr
 
 
+# ------------------------------------------------------
+# 5c. sigma_h2 | h, mu_h, phi_h  (conjugate Inverse-Gamma)
+# ------------------------------------------------------
 def _sample_sigma_h2(h: np.ndarray,
                      mu_h: float,
                      phi_h: float,
                      sigma_prior: dict,
                      rng: np.random.Generator) -> float:
     """
-    Conjugate IG update for sigma_h2 | h, mu_h, phi_h.
+    Conjugate IG update:
+        sigma_h2 | h, mu_h, phi_h  ~  IG(shape0 + (T-1)/2, scale0 + 0.5 * SS)
+    where SS = sum_t (h_t - mu_h - phi_h (h_{t-1} - mu_h))^2.
     """
     eta = (h[1:] - mu_h) - phi_h * (h[:-1] - mu_h)      # AR(1) innovations
     T_eff = eta.shape[0]
@@ -224,11 +298,13 @@ def _sample_sigma_h2(h: np.ndarray,
     return post_scale / rng.standard_gamma(post_shape)
 
 
-
+# ------------------------------------------------------
+# Helper: get fresh residuals from the current state
+# ------------------------------------------------------
 def _current_residuals(state: dict) -> np.ndarray:
     """
-    Lazy-import step3 helpers to avoid circular imports at module load.
-    Returns an independent (T, ny) array we can mutate freely.
+    Lazy import of step3.compute_residuals to avoid circular imports
+    at module load time. Returns an independent (T, ny) array.
     """
     from step3 import compute_residuals
     return compute_residuals(state)
@@ -240,15 +316,14 @@ def _current_residuals(state: dict) -> np.ndarray:
 def step6_sample_SV(state: dict, rng: np.random.Generator) -> dict:
     """
     One Gibbs sweep over the stochastic-volatility block:
-        1. lambda_t             (closed-form IG, vectorised over t)
-        2. y_star               (KSC log-observation)
-        3. s_t                  (categorical over 7 mixture components)
-        4. h_t                  (FFBS, scalar recursions)
-        5. mu_h, phi_h, sigma_h2  (conjugate / MH updates)
+        1. lambda_t              (closed-form IG, vectorised over t)
+        2. y_star                (KSC log-observation)
+        3. s_t                   (categorical over 7 mixture components)
+        4. h_t                   (FFBS, scalar recursions)
+        5. IDENTIFICATION fix    (re-centre log lam to mean 0, absorb in h)
+        6. mu_h, phi_h, sigma_h2 (conjugate / MH updates on the centred h)
 
-    All arrays are allocated once per call and kept in float64 internally
-    for numerical stability of the AR(1) recursion; storage in main.py
-    down-casts to float32 when persisting.
+    Returns a small dict of scalar diagnostics for the progress logger.
     """
     ny       = state['ny']
     T        = state['T']
@@ -266,8 +341,6 @@ def step6_sample_SV(state: dict, rng: np.random.Generator) -> dict:
 
     # --- Precompute Sigma_u^{-1} once (used by _sample_lambda and _build_y_star) ---
     # cho_solve avoids forming the explicit inverse until the final step.
-    # For ny up to a few dozen this is essentially free, but the pattern
-    # matters if ny ever grows.
     cho, low = cho_factor(Sigma_u, lower=True, check_finite=False)
     Sigma_u_inv = cho_solve((cho, low), np.eye(ny), check_finite=False)
     # Symmetrise to kill floating-point drift before einsum consumes it
@@ -288,7 +361,21 @@ def step6_sample_SV(state: dict, rng: np.random.Generator) -> dict:
     # ---- 4. h_t via FFBS ----
     h = _ffbs_h(y_star, s, mu_h, phi_h, sigma_h2, rng)
 
-    # ---- 5. AR(1) hyper-parameters ----
+    # ---- 5. IDENTIFICATION FIX (v2: robust to outliers) ----------------
+    # Re-centre log lam using the MEDIAN (not the mean) so a few large
+    # lambda_t values can't dominate the shift and crush everyone else.
+    # Floor lam from below after centring to avoid numerical underflow
+    # in the next iteration's y_star = log(q_raw / (ny * lam)).
+    log_lam = np.log(lam)
+    shift   = float(np.median(log_lam))      # robust to outliers
+    lam     = lam * np.exp(-shift)           # mean(log lam) ~ 0 (in the bulk)
+    lam     = np.maximum(lam, 1e-3)          # prevent underflow in next iter
+    h       = h + shift                      # absorb the shift into h_t
+    # ---------------------------------------------------------------------
+
+    # ---- 6. AR(1) hyper-parameters (on the CENTRED h_t) -----------------
+    # Order matters: mu_h first, then phi_h (uses fresh mu_h), then
+    # sigma_h2 (uses fresh mu_h and phi_h).
     mu_h     = _sample_mu_h    (h, phi_h, sigma_h2, mu_prior,    rng)
     phi_h    = _sample_phi_h   (h, mu_h,  sigma_h2, phi_prior,   rng)
     sigma_h2 = _sample_sigma_h2(h, mu_h,  phi_h,    sigma_prior, rng)

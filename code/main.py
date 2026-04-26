@@ -30,7 +30,7 @@ SELECTED_LAGS = [1, 2, 3, 7]
 
 HPARAMS = {
     # Minnesota prior
-    'pi_shrink':   0.05,
+    'pi_shrink':   0.001,
     'lag_decay':   2.0,
     'exog_weight': 0.5,
 
