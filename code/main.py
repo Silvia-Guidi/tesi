@@ -18,10 +18,10 @@ OUTPUT_DIR  = Path("outputs")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Gibbs sampler settings
-N_ITER           = 5_000        # total iterations
-BURNIN           = 2_000        # burn-in iterations to discard
+N_ITER           = 20000        # total iterations
+BURNIN           = 10000        # burn-in iterations to discard
 N_KEEP           = N_ITER - BURNIN
-CHECKPOINT_EVERY = 1_000        # flush partial samples to disk every N iterations
+CHECKPOINT_EVERY = 2000        # flush partial samples to disk every N iterations
 
 SEED = 42
 
@@ -172,7 +172,7 @@ def main():
         # STEP 5: sample Gamma - TO BE ADDED
         # step5_sample_Gamma(state, rng)
 
-        # STEP 6: sample h_t, lambda_t - TO BE ADDED
+        # STEP 6: sample h_t, lambda_t 
         diag6 = step6_sample_SV(state, rng)
 
         # --- Store post-burn-in samples ---
