@@ -26,7 +26,7 @@ CHECKPOINT_EVERY = 2000        # flush partial samples to disk every N iteration
 SEED = 42
 
 # Model settings
-SELECTED_LAGS = [1, 2, 3, 7]
+SELECTED_LAGS = [1]
 
 HPARAMS = {
     # Minnesota prior
@@ -63,12 +63,43 @@ HPARAMS = {
 # --------------------------------------------------------
 # DATA LOADING
 # --------------------------------------------------------
+# --------------------------------------------------------
+# DATA LOADING
+# --------------------------------------------------------
+# Switch to control which subset of variables is loaded.
+# - "prices_only": keep only price columns (every other column starting from 0)
+# - "all":         keep prices + loads (original behaviour)
+DATA_MODE = "prices_only"
+
+# Number of variables per country in the original Y.npy layout.
+# The construction is: [c1_price, c1_load, c2_price, c2_load, ...]
+N_VARS_PER_COUNTRY_FULL = 2
+
+
 def load_data() -> np.ndarray:
+    """
+    Load Y.npy and optionally subset to prices only.
+
+    The original Y.npy is built by interleaving price and load columns per
+    country: column 2*c is the price for country c, column 2*c+1 is the load.
+    When DATA_MODE == "prices_only" we keep just the price columns (stride 2,
+    starting at 0), so ny becomes equal to the number of countries.
+    """
     path  = DATA_DIR / "Y.npy"
     y_raw = np.load(path)
-    print(f"[Data] Loaded Y: {y_raw.shape[0]} observations, {y_raw.shape[1]} variables")
-    return y_raw.astype(np.float64)
+    print(f"[Data] Loaded Y from disk: {y_raw.shape[0]} obs, {y_raw.shape[1]} vars")
 
+    if DATA_MODE == "prices_only":
+        # Keep columns 0, 2, 4, ... (the price slot inside each country block).
+        y_raw = y_raw[:, 0::N_VARS_PER_COUNTRY_FULL]
+        print(f"[Data] Subset to prices only: now {y_raw.shape[1]} variables "
+              f"({y_raw.shape[1]} countries x 1 var)")
+    elif DATA_MODE == "all":
+        pass
+    else:
+        raise ValueError(f"Unknown DATA_MODE: {DATA_MODE!r}")
+
+    return y_raw.astype(np.float64)
 
 # --------------------------------------------------------
 # STORAGE
@@ -173,7 +204,7 @@ def main():
         # step5_sample_Gamma(state, rng)
 
         # STEP 6: sample h_t, lambda_t 
-        diag6 = step6_sample_SV(state, rng)
+        # diag6 = step6_sample_SV(state, rng)
 
         # --- Store post-burn-in samples ---
         if t >= BURNIN:
@@ -186,10 +217,10 @@ def main():
             samples['Phi'][:, :, :, k] = np.stack(state['Phi'], axis=-1)
             samples['phi_norm'][k]     = diag4['phi_norm']
             samples['h'][:, k]               = state['h']
-            samples['lambda_t'][:, k]        = state['lambda_t']
-            samples['mu_h'][k]               = state['mu_h']
-            samples['phi_h'][k]              = state['phi_h']
-            samples['sigma_h2'][k]           = state['sigma_h2']
+            #samples['lambda_t'][:, k]        = state['lambda_t']
+            #samples['mu_h'][k]               = state['mu_h']
+            #samples['phi_h'][k]              = state['phi_h']
+            #samples['sigma_h2'][k]           = state['sigma_h2']
             
 
         # --- Progress report every 500 iterations ---
@@ -204,10 +235,10 @@ def main():
                 f"logdet(Σ)={diag3['logdet_Sigma']:+.2f}  "
                 f"S4 |Φ|_F={diag4['phi_norm']:.3f}  "
                 f"S4 max|Φ|={diag4['phi_max_abs']:.3f}"
-                f"⟨h⟩={diag6['h_mean']:+.2f}  "
-                f"φ_h={diag6['phi_h']:.3f}  "
-                f"σ_h²={diag6['sigma_h2']:.4f}  "
-                f"⟨λ⟩={diag6['lambda_mean']:.2f}"
+                #f"⟨h⟩={diag6['h_mean']:+.2f}  "
+                #f"φ_h={diag6['phi_h']:.3f}  "
+                #f"σ_h²={diag6['sigma_h2']:.4f}  "
+                #f"⟨λ⟩={diag6['lambda_mean']:.2f}"
             )
 
         # --- Periodic checkpoint (only after burn-in, while we have real samples) ---

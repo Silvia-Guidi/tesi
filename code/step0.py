@@ -172,13 +172,13 @@ def initialize_model (
         'Sigma_u':        Sigma_u,  
  
         # -- Stochastic volatility ---
-        'h':              h,        
+        'h':              None,        
         'phi_h':          phi_h,
         'mu_h':           mu_h,
         'sigma_h2':       sigma_h2,
  
         # -- Student-t mixing ---
-        'lambda_t':       lambda_t, 
+        'lambda_t':       None, 
         'nu':             nu,
  
         # -- Priors ---
