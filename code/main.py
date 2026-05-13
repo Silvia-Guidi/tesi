@@ -232,7 +232,7 @@ def main():
         diag5 = step5_sample_Gamma(state, rng)
 
         # STEP 6: sample h_t, lambda_t 
-        # diag6 = step6_sample_SV(state, rng)
+        diag6 = step6_sample_SV(state, rng)
 
         # --- Store post-burn-in samples ---
         if t >= BURNIN:
@@ -248,11 +248,11 @@ def main():
             samples['phi_norm'][k]     = diag4['phi_norm']
             samples['Gamma'][:, :, :, k] = np.stack(state['Gamma'], axis=-1)
             samples['gamma_norm'][k]     = diag5['gamma_norm']
-            #samples['h'][:, k]               = state['h']
+            samples['h'][:, k]               = state['h']
             #samples['lambda_t'][:, k]        = state['lambda_t']
             #samples['mu_h'][k]               = state['mu_h']
             #samples['phi_h'][k]              = state['phi_h']
-            #samples['sigma_h2'][k]           = state['sigma_h2']
+            samples['sigma_h2'][k]           = state['sigma_h2']
             
 
         # --- Progress report every 500 iterations ---
@@ -267,9 +267,9 @@ def main():
                 f"logdet(Σ)={diag3['logdet_Sigma']:+.2f}  "
                 f"S4 |Φ|_F={diag4['phi_norm']:.3f}  "
                 f"S4 max|Φ|={diag4['phi_max_abs']:.3f}"
-                #f"⟨h⟩={diag6['h_mean']:+.2f}  "
+                f"⟨h⟩={diag6['h_mean']:+.2f}  "
                 #f"φ_h={diag6['phi_h']:.3f}  "
-                #f"σ_h²={diag6['sigma_h2']:.4f}  "
+                f"σ_h²={diag6['sigma_h2']:.4f}  "
                 #f"⟨λ⟩={diag6['lambda_mean']:.2f}"
             )
 

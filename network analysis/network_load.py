@@ -428,31 +428,3 @@ def print_summary(chain: ChainOutput) -> None:
     print("=" * 60)
 
 
-# ============================================================
-# QUICK SELF-TEST (run only when executed as a script)
-# ============================================================
-
-if __name__ == "__main__":
-    # Quick smoke test of build_exogenous_labels in both modes.
-    print("--- Mode: free ---")
-    labels, country_idx, mask_free = build_exogenous_labels(admissibility_mode="free")
-    print(f"Built {len(labels)} exogenous labels.")
-    print(f"First 3 wind  : {labels[:3]}")
-    print(f"First 3 solar : {labels[28:31]}")
-    print(f"Admissibility mask shape : {mask_free.shape}")
-    print(f"Admissible cells (free)  : {int(mask_free.sum())}  "
-          f"(expected: 28 * 53 = 1484)")
-    assert int(mask_free.sum()) == 28 * 53
-
-    print()
-    print("--- Mode: country_specific ---")
-    _, _, mask_cs = build_exogenous_labels(admissibility_mode="country_specific")
-    print(f"Admissible cells (cs)    : {int(mask_cs.sum())}  "
-          f"(expected: 28 + 25 = 53)")
-    row_sums = mask_cs.sum(axis=1)
-    print(f"Row sums (admissible exogenous per country): "
-          f"min={row_sums.min()}, max={row_sums.max()}")
-    for c in SOLAR_EXCLUDED:
-        i = COUNTRIES.index(c)
-        assert row_sums[i] == 1, f"{c} should have 1 admissible exog, got {row_sums[i]}"
-    print("Solar-excluded countries correctly have only wind: OK")

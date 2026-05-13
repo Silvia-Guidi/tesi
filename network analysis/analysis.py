@@ -2,6 +2,9 @@ import numpy as np
 from network_load import load_chain_output, print_summary
 from edge_analysis import analyse_all_edges
 from network_metrics import compute_G0_metrics, print_node_metric, print_graph_metrics
+from Phi_analysis import compute_all_phi_metrics, print_weighted_bundle
+from Gamma_analysis import compute_all_gamma_metrics
+from excel_export import export_to_excel
 
 # selected_lags devono essere gli stessi del Gibbs sampler
 chain = load_chain_output(
@@ -66,3 +69,21 @@ print_node_metric(metrics.total_degree, top_k=10)
 print_node_metric(metrics.eigen_centr,  top_k=10)
 print_node_metric(metrics.betweenness,  top_k=10)
 print_graph_metrics(metrics)
+
+
+phi_results = compute_all_phi_metrics(chain, threshold=0.01, verbose=True)
+
+# Stampa tutto
+for key in ["lag1", "lag7", "agg"]:
+    print_weighted_bundle(phi_results[key], k=10)
+    
+gamma_res = compute_all_gamma_metrics(chain, threshold=0.0, verbose=True)
+
+export_to_excel(
+    chain        = chain,
+    edge_bundle  = bundle,
+    g0_metrics   = metrics,
+    phi_results  = phi_results,
+    gamma_res    = gamma_res,
+    output_path  = "network_metrics.xlsx",
+)
