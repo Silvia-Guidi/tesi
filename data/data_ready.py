@@ -9,8 +9,8 @@ COLUMN CONVENTION in each file:
     {COUNTRY}_{variable}  e.g., "IT_Wind", "DE_Solar", "FR_Load", "IT_Price"
 
 OUTPUT:
-    Y.npy  -> array [T x n_endo]  interleaved layout: [p_AT, d_AT, p_BE, d_BE, ...]
-    X.npy  -> array [T x n_exo]   exogenous block (wind, solar, hydro, reserve margin)
+    Y.parquet  -> DataFrame [T x n_endo] interleaved: [p_AT, d_AT, p_BE, d_BE, ...]
+    X.parquet  -> DataFrame [T x n_exo]  exogenous block (wind, solar, hydro, RM)
     countries_final.csv  -> ordered list of countries actually used
     df_full_check.xlsx   -> full merged dataframe for inspection
 """
@@ -29,7 +29,7 @@ FILE_MAP = {
     "reserve" : DATA_DIR / "reserve_margin_data"   / "reserve_margin_data.xlsx",
 }
 
-# Countries to consider (the filtering step will keep only those with BOTH Price and Load)
+# Countries to consider (the filtering step keeps only those with BOTH Price and Load)
 COUNTRIES = ["AT", "BA", "BE", "BG", "CH", "CZ", "DE",
     "DK", "EE", "ES", "FI", "FR",
     "GR", "HR", "HU", "IE", "IT", "LT", "LV", "MD",
@@ -147,7 +147,6 @@ def impute(
 # ---------------------------------------------------------------
 # MAIN PIPELINE
 # ---------------------------------------------------------------
-print("=" * 60)
 print("LOADING FILES")
 print("=" * 60)
 
@@ -160,7 +159,6 @@ print(f"  gen_data     : {df_gen.shape}")
 print(f"  load_data    : {df_load.shape}")
 print(f"  price_data   : {df_price.shape}")
 print(f"  reserve_data : {df_reserve.shape}")
-
 
 # ---------------------------------------------------------------
 # COUNTRY FILTERING (balanced panel required by BGVAR)
@@ -284,83 +282,81 @@ df_full.to_excel(DATA_DIR / "df_full_check.xlsx")
 
 
 # ---------------------------------------------------------------
-# ARRAYS FOR GIBBS SAMPLER
-# ---------------------------------------------------------------
-Y_np  = Y.values.astype(float)    # [T x n_endo]
-X_np  = X.values.astype(float)    # [T x n_exo]
-dates = Y.index
-
-T, n = Y_np.shape
-_, k = X_np.shape
-
-
-# ---------------------------------------------------------------
 # STANDARDIZATION (column-wise: zero mean, unit variance)
 # ---------------------------------------------------------------
 # Essential because price (EUR/MWh, O(1e2)) and load (MW, O(1e4)) live on
 # very different scales. A raw Y.T @ Y is badly conditioned and breaks
 # Cholesky / slogdet / Wishart sampling inside the Gibbs sampler.
-# We save the scaling factors so posterior results can be back-transformed
-# to the original units (EUR/MWh, MW) for interpretation.
+#
+# We standardize while still in DataFrame form so that column names (and
+# the date index) survive the operation and end up in the parquet files.
+# Scaling factors are saved separately so posterior results can be
+# back-transformed to the original units (EUR/MWh, MW) for interpretation.
 
 print("\n" + "=" * 60)
 print("STANDARDIZATION (zero mean, unit variance per column)")
 print("=" * 60)
 
-# Endogenous variables
-y_mean    = Y_np.mean(axis=0)
-y_std_dev = Y_np.std(axis=0, ddof=1)
+# --- Endogenous variables ----------------------------------------------------
+y_mean    = Y.mean()                 # Series indexed by column name
+y_std_dev = Y.std(ddof=1)
 
-if np.any(y_std_dev < 1e-10):
-    bad_cols = [Y.columns[i] for i in np.where(y_std_dev < 1e-10)[0]]
-    raise ValueError(f"Zero-variance columns in Y: {bad_cols}")
+zero_var_Y = y_std_dev[y_std_dev < 1e-10].index.tolist()
+if zero_var_Y:
+    raise ValueError(f"Zero-variance columns in Y: {zero_var_Y}")
 
-Y_std = (Y_np - y_mean) / y_std_dev
+Y_std = (Y - y_mean) / y_std_dev     # still a DataFrame
 
-# Exogenous variables
-x_mean    = X_np.mean(axis=0)
-x_std_dev = X_np.std(axis=0, ddof=1)
+# --- Exogenous variables -----------------------------------------------------
+x_mean    = X.mean()
+x_std_dev = X.std(ddof=1)
 
-if np.any(x_std_dev < 1e-10):
-    bad_cols = [X.columns[i] for i in np.where(x_std_dev < 1e-10)[0]]
-    print(f"  [!] Zero-variance columns in X (will be kept at 0): {bad_cols}")
-    x_std_dev = np.where(x_std_dev < 1e-10, 1.0, x_std_dev)  # avoid div-by-zero
+zero_var_X = x_std_dev[x_std_dev < 1e-10].index.tolist()
+if zero_var_X:
+    print(f"  [!] Zero-variance columns in X (kept at 0): {zero_var_X}")
+    # Replace zero std with 1 to avoid division-by-zero; those columns
+    # will end up as exact zeros after centring.
+    x_std_dev = x_std_dev.replace(0.0, 1.0).where(x_std_dev >= 1e-10, 1.0)
 
-X_std = (X_np - x_mean) / x_std_dev
+X_std = (X - x_mean) / x_std_dev     # still a DataFrame
 
-print(f"Y raw      : min={Y_np.min():>10.2f}, max={Y_np.max():>10.2f}")
-print(f"Y standard : min={Y_std.min():>10.2f}, max={Y_std.max():>10.2f}  "
+print(f"Y raw      : min={Y.values.min():>10.2f}, max={Y.values.max():>10.2f}")
+print(f"Y standard : min={Y_std.values.min():>10.2f}, max={Y_std.values.max():>10.2f}  "
       f"(mean~0, std~1)")
-print(f"X raw      : min={X_np.min():>10.2f}, max={X_np.max():>10.2f}")
-print(f"X standard : min={X_std.min():>10.2f}, max={X_std.max():>10.2f}  "
+print(f"X raw      : min={X.values.min():>10.2f}, max={X.values.max():>10.2f}")
+print(f"X standard : min={X_std.values.min():>10.2f}, max={X_std.values.max():>10.2f}  "
       f"(mean~0, std~1)")
 
 
 # ---------------------------------------------------------------
 # SAVE EVERYTHING
 # ---------------------------------------------------------------
+T, n = Y_std.shape
+_, k = X_std.shape
+
 print("\n" + "=" * 60)
 print("ARRAYS READY FOR GIBBS SAMPLER")
 print("=" * 60)
 print(f"  Y_std  : {Y_std.shape}   (T={T}, n={n} endo vars = 2 x {n // 2} countries)")
 print(f"  X_std  : {X_std.shape}   (T={T}, k={k} exo vars)")
 print(f"  Layout of Y columns (interleaved):")
-for i, col in enumerate(Y.columns):
+for i, col in enumerate(Y_std.columns):
     print(f"    {i:>3}: {col}")
 
-# Save standardized arrays (what the Gibbs sampler will read)
-np.save(DATA_DIR / "Y.npy", Y_std)
-np.save(DATA_DIR / "X.npy", X_std)
+# Save standardized data as parquet so the Gibbs sampler can filter
+# variables by substring matching on the column headers.
+Y_std.to_parquet(DATA_DIR / "Y.parquet")
+X_std.to_parquet(DATA_DIR / "X.parquet")
 
-# Save scaling factors for back-transformation of posterior results
-np.save(DATA_DIR / "Y_mean.npy",    y_mean)
-np.save(DATA_DIR / "Y_std_dev.npy", y_std_dev)
-np.save(DATA_DIR / "X_mean.npy",    x_mean)
-np.save(DATA_DIR / "X_std_dev.npy", x_std_dev)
+# Save scaling factors as numpy arrays for back-transformation.
+np.save(DATA_DIR / "Y_mean.npy",    y_mean.values)
+np.save(DATA_DIR / "Y_std_dev.npy", y_std_dev.values)
+np.save(DATA_DIR / "X_mean.npy",    x_mean.values)
+np.save(DATA_DIR / "X_std_dev.npy", x_std_dev.values)
 
-print(f"\nSaved: {DATA_DIR / 'Y.npy'}        (standardized)")
-print(f"Saved: {DATA_DIR / 'X.npy'}        (standardized)")
-print(f"Saved: {DATA_DIR / 'Y_mean.npy'}   (for back-transformation)")
+print(f"\nSaved: {DATA_DIR / 'Y.parquet'}     (standardized)")
+print(f"Saved: {DATA_DIR / 'X.parquet'}     (standardized)")
+print(f"Saved: {DATA_DIR / 'Y_mean.npy'}    (for back-transformation)")
 print(f"Saved: {DATA_DIR / 'Y_std_dev.npy'}")
 print(f"Saved: {DATA_DIR / 'X_mean.npy'}")
 print(f"Saved: {DATA_DIR / 'X_std_dev.npy'}")

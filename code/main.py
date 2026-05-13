@@ -1,12 +1,14 @@
 import numpy as np
 from pathlib import Path
 import time
+import pandas as pd
 
 from step0 import initialize_model
 from step1 import step1_sample_G0
 from step2 import step2_sample
 from step3 import step3_sample
 from step4 import step4_sample_Phi
+from step5 import step5_sample_Gamma
 from step6 import step6_sample_SV
 
 # --------------------------------------------------------
@@ -26,7 +28,7 @@ CHECKPOINT_EVERY = 2000        # flush partial samples to disk every N iteration
 SEED = 42
 
 # Model settings
-SELECTED_LAGS = [1]
+SELECTED_LAGS = [1, 7]
 
 HPARAMS = {
     # Minnesota prior
@@ -43,12 +45,12 @@ HPARAMS = {
 
     # Stochastic volatility prior
     'stochastic_volatility': {
-        'phi_a':   20,
-        'phi_b':   1.5,
-        'mu_0':    0.0,
-        'mu_var':  10.0,
-        'sigma_v': 10.0,
-        'sigma_s': 0.1,
+        'phi_a':   20,       # non più usato (RW)
+        'phi_b':   1.5,      # non più usato
+        'mu_0':    0.0,      # non più usato
+        'mu_var':  10.0,     # non più usato
+        'sigma_v': 20.0,     # nu_h = 10  → shape = 10
+        'sigma_s': 0.18,     # S_h = 0.09 → scale = 0.09
     },
 
     # Degrees-of-freedom prior for lambda_t
@@ -59,52 +61,67 @@ HPARAMS = {
     },
 }
 
+DATA_MODE = "prices_only"            # endogenous: "prices_only" | "all"
+EXO_SUFFIXES: list[str] = ["wind", "solar"]   # empty list = no exogenous
 
-# --------------------------------------------------------
-# DATA LOADING
-# --------------------------------------------------------
-# --------------------------------------------------------
-# DATA LOADING
-# --------------------------------------------------------
-# Switch to control which subset of variables is loaded.
-# - "prices_only": keep only price columns (every other column starting from 0)
-# - "all":         keep prices + loads (original behaviour)
-DATA_MODE = "prices_only"
-
-# Number of variables per country in the original Y.npy layout.
-# The construction is: [c1_price, c1_load, c2_price, c2_load, ...]
-N_VARS_PER_COUNTRY_FULL = 2
-
-
-def load_data() -> np.ndarray:
+def load_data() -> tuple[np.ndarray, np.ndarray | None, list[str], list[str]]:
     """
-    Load Y.npy and optionally subset to prices only.
-
-    The original Y.npy is built by interleaving price and load columns per
-    country: column 2*c is the price for country c, column 2*c+1 is the load.
-    When DATA_MODE == "prices_only" we keep just the price columns (stride 2,
-    starting at 0), so ny becomes equal to the number of countries.
+    Load Y.parquet and X.parquet. Column names are preserved by parquet,
+    so we can filter exogenous/endogenous variables by substring match on
+    the column names (e.g. 'price', 'solar', 'wind').
     """
-    path  = DATA_DIR / "Y.npy"
-    y_raw = np.load(path)
-    print(f"[Data] Loaded Y from disk: {y_raw.shape[0]} obs, {y_raw.shape[1]} vars")
+    # --- Endogenous ---
+    Y_df = pd.read_parquet(DATA_DIR / "Y.parquet")
+    print(f"[Data] Loaded Y: {Y_df.shape[0]} obs, {Y_df.shape[1]} vars")
 
     if DATA_MODE == "prices_only":
-        # Keep columns 0, 2, 4, ... (the price slot inside each country block).
-        y_raw = y_raw[:, 0::N_VARS_PER_COUNTRY_FULL]
-        print(f"[Data] Subset to prices only: now {y_raw.shape[1]} variables "
-              f"({y_raw.shape[1]} countries x 1 var)")
+        endo_cols = [c for c in Y_df.columns if "price" in c.lower()]
     elif DATA_MODE == "all":
-        pass
+        endo_cols = list(Y_df.columns)
     else:
         raise ValueError(f"Unknown DATA_MODE: {DATA_MODE!r}")
 
-    return y_raw.astype(np.float64)
+    Y_df = Y_df[endo_cols]
+    print(f"[Data] Endo selection: {len(endo_cols)} variables")
 
-# --------------------------------------------------------
+    # --- Exogenous (optional) ---
+    X_path = DATA_DIR / "X.parquet"
+    if X_path.exists() and EXO_SUFFIXES:
+        X_df = pd.read_parquet(X_path)
+        print(f"[Data] Loaded X: {X_df.shape[0]} obs, {X_df.shape[1]} vars")
+
+        if X_df.shape[0] != Y_df.shape[0]:
+            raise ValueError(
+                f"X has {X_df.shape[0]} rows but Y has {Y_df.shape[0]}."
+            )
+
+        # Pick columns whose name contains any of the requested suffixes,
+        # preserving the order in EXO_SUFFIXES (all 'winds' first, then
+        # 'solars', etc.) so downstream lag stacking sees a clean block layout.
+        exo_cols = []
+        for sfx in EXO_SUFFIXES:
+            matches = [c for c in X_df.columns if sfx.lower() in c.lower()]
+            if not matches:
+                raise ValueError(
+                    f"No X columns match suffix {sfx!r}. "
+                    f"Available: {list(X_df.columns)}"
+                )
+            exo_cols.extend(matches)
+            print(f"[Data] Exo suffix {sfx!r}: {len(matches)} columns")
+
+        X_df = X_df[exo_cols]
+        X_exo_raw = X_df.values.astype(np.float64)
+        exo_names = list(X_df.columns)
+    else:
+        X_exo_raw = None
+        exo_names = []
+
+    return Y_df.values.astype(np.float64), X_exo_raw, list(Y_df.columns), exo_names
+
+# --------------------------------
 # STORAGE
 # --------------------------------------------------------
-def allocate_storage(ny: int, n_lags: int, T_eff: int) -> dict:
+def allocate_storage(ny: int, nz: int, n_lags: int, n_lags_exo: int, T_eff: int) -> dict:
     """
     Pre-allocate arrays for all post-burn-in samples.
 
@@ -120,6 +137,7 @@ def allocate_storage(ny: int, n_lags: int, T_eff: int) -> dict:
 
         # Temporal graph for all lags (4D)
         'G_Phi':        np.zeros((ny, ny, n_lags, N_KEEP), dtype=np.uint8),
+        'G_Gamma':      np.zeros((ny, nz, n_lags, N_KEEP), dtype=np.uint8),
 
         # Reduced-form residual covariance
         'Sigma_u':      np.zeros((ny, ny, N_KEEP),         dtype=np.float32),
@@ -128,10 +146,15 @@ def allocate_storage(ny: int, n_lags: int, T_eff: int) -> dict:
         # Phi
         'Phi': np.zeros((ny, ny, n_lags, N_KEEP), dtype=np.float32),
         'phi_norm':    np.zeros(N_KEEP),
+        
+        # Gamma
+        'Gamma' :    np.zeros((ny, nz, n_lags_exo, N_KEEP)),
+        'gamma_norm':  np.zeros(N_KEEP), 
 
         # Step 6: stochastic volatility + Student-t mixing
         'h':            np.zeros((T_eff, N_KEEP), dtype=np.float32),
         'lambda_t':     np.zeros((T_eff, N_KEEP), dtype=np.float32),
+        
         # Scalar AR(1) hyper-parameters: one value per kept iteration
         'mu_h':         np.zeros(N_KEEP, dtype=np.float32),
         'phi_h':        np.zeros(N_KEEP, dtype=np.float32),
@@ -157,20 +180,25 @@ def main():
     rng = np.random.default_rng(SEED)
 
     # --- Data and initial state ---
-    y_raw = load_data()
+    y_raw, X_exo_raw, endo_names, exo_names = load_data()
     state = initialize_model(
         y_raw         = y_raw,
+        X_exo_raw     = X_exo_raw,         # nuovo argomento
         selected_lags = SELECTED_LAGS,
         hparams       = HPARAMS,
         rng           = rng,
     )
+    state['endo_names'] = endo_names
+    state['exo_names']  = exo_names
 
     # Make hparams accessible to step3 (it reads state['hparams'])
     state['hparams'] = HPARAMS
 
     ny     = state['ny']
+    nz     = state['nz']
     T      = state['T']
     n_lags = state['n_lags']
+    n_lags_exo = state['n_lags_exo']
 
     print(f"[Init] ny={ny} variables, T={T} effective observations, n_lags={n_lags}")
     print(f"[Init] G0_expanded active arcs: {int(state['G0_expanded'].sum())}")
@@ -180,7 +208,7 @@ def main():
     np.save(OUTPUT_DIR / "G0_expanded.npy", state['G0_expanded'].astype(np.uint8))
 
     # --- Allocate sample storage ---
-    samples = allocate_storage(ny, n_lags, T)
+    samples = allocate_storage(ny, nz, n_lags, n_lags_exo, T)
 
     # --- Gibbs loop ---
     print(f"Running {N_ITER} iterations ({BURNIN} burn-in + {N_KEEP} kept)...\n")
@@ -200,8 +228,8 @@ def main():
         # STEP 4: sample Phi 
         diag4 = step4_sample_Phi(state, rng)
 
-        # STEP 5: sample Gamma - TO BE ADDED
-        # step5_sample_Gamma(state, rng)
+        # STEP 5: sample Gamma 
+        diag5 = step5_sample_Gamma(state, rng)
 
         # STEP 6: sample h_t, lambda_t 
         # diag6 = step6_sample_SV(state, rng)
@@ -212,11 +240,15 @@ def main():
             samples['G0'][:, :, k]           = state['G0']
             # Vectorised assignment: stack the list into a single (ny, ny, n_lags) array
             samples['G_Phi'][:, :, :, k]     = np.stack(state['G_Phi'], axis=-1)
+            if nz > 0:
+                samples['G_Gamma'][:, :, :, k] = np.stack(state['G_Gamma'], axis=-1)
             samples['Sigma_u'][:, :, k]      = state['Sigma_u']
             samples['logdet_Sigma'][k]       = diag3['logdet_Sigma']
             samples['Phi'][:, :, :, k] = np.stack(state['Phi'], axis=-1)
             samples['phi_norm'][k]     = diag4['phi_norm']
-            samples['h'][:, k]               = state['h']
+            samples['Gamma'][:, :, :, k] = np.stack(state['Gamma'], axis=-1)
+            samples['gamma_norm'][k]     = diag5['gamma_norm']
+            #samples['h'][:, k]               = state['h']
             #samples['lambda_t'][:, k]        = state['lambda_t']
             #samples['mu_h'][k]               = state['mu_h']
             #samples['phi_h'][k]              = state['phi_h']
