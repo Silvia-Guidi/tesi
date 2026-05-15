@@ -97,7 +97,7 @@ def initialize_model (
     pi_bernoulli = bern_prior['pi']
     
     # --- Stochastic volatility priors ---
-    phi_prior_sv, mu_prior_sv, sigma_prior_sv, h_init = stochastic_volatility_prior(hparams)
+    sigma_prior_sv, h_init = stochastic_volatility_prior(hparams)
     
     #--- Degrees-of-freedom prior for λ_t ---
     nu_prior, nu_init = df_prior(hparams)
@@ -160,11 +160,6 @@ def initialize_model (
     # 7. STOCHASTIC VOLATILITY INIT
     h = np.full(T, h_init)
     
-    # phi_h : AR(1) persistence of log-vol, initialized to prior mean of Beta(20,1.5)
-    #         E[Beta(a,b)] = a/(a+b)
-    phi_h = phi_prior_sv['a']/ (phi_prior_sv['a'] + phi_prior_sv['b'])
-    
-    mu_h = mu_prior_sv['mean']
     
     # sigma_h2 : variance of log-vol innovations
     #            initialized to prior mean of IG: E[IG(shape,scale)] = scale/(shape-1)
@@ -214,11 +209,12 @@ def initialize_model (
         'Sigma_u':        Sigma_u,  
  
         # -- Stochastic volatility ---
-        'h':              h,        
-        'phi_h':          phi_h,
-        'mu_h':           mu_h,
-        'sigma_h2':       sigma_h2,
-        'V_h0':             hparams.get('V_h0', 10.0),
+        'h':              h,    
+        'sigma_h2':       0.1,
+        'V_h0':           10,
+        'sv_propsd':      0.2,
+        'sv_iter':        0,
+        'BURNIN_for_SV':  hparams.get('sv_burnin_adapt', 1000), 
  
         # -- Student-t mixing ---
         'lambda_t':       lambda_t, 
@@ -231,8 +227,6 @@ def initialize_model (
         'S_prior':        S_prior,
         'alpha_prior':    alpha_prior,
         'pi_bernoulli':   pi_bernoulli,
-        'phi_prior_sv':   phi_prior_sv,
-        'mu_prior_sv':    mu_prior_sv,
         'sigma_prior_sv': sigma_prior_sv,
         'nu_prior':       nu_prior,
         'lambda_prior':   lambda_prior

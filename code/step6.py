@@ -1,156 +1,174 @@
 """
-STEP 6 (RANDOM WALK SV) -- Stochastic Volatility for the BGVAR.
+STEP 6 (RANDOM WALK SV, SINGLE-SITE METROPOLIS-HASTINGS)
+========================================================
+Stochastic Volatility for the BGVAR -- minimalist version.
 
 Model
 -----
 For each time t = 1, ..., T:
     u_t  | h_t  ~  N_{ny}(0,  exp(h_t) * Sigma_u)        # reduced-form residuals
-    h_t          =  h_{t-1} + eta_t,    eta_t ~ N(0, sigma_h^2)         # RANDOM WALK
-    h_0          ~  N(0, V_h0)                                          # diffuse prior on level
+    h_t          =  h_{t-1} + eta_t,  eta_t ~ N(0, sigma_h^2)         # random walk
+    h_0          ~  N(0, V_h0)                                        # diffuse prior on level
 
-Following Gianfreda, Ravazzolo & Rossini (2023, Oxford Bulletin), we drop
-both the AR(1) drift (mu_h) and persistence (phi_h) and let h_t evolve as
-a random walk.  This kills the identification ridge that flattens h_t in
-the AR(1) specification: the level is anchored only by the prior on h_0
-and by the data, with nothing else competing for it.
+Why this version
+----------------
+The previous step6 used the Kim-Shephard-Chib (KSC) 7-component mixture
+augmentation followed by Forward-Filter-Backward-Sampling (FFBS) on the
+resulting linear-Gaussian state space.  That is the textbook fast block
+sampler, but it has many moving parts: a KSC pseudo-observation tuned for
+ny=1, a Kalman forward pass, a backward simulation smoother, and tight
+sensitivity to initial conditions and diffuse priors.  Any small bug in
+any of those collapses the entire path toward the prior mean.
 
-Gibbs sweep:
-    1. Build the pseudo-observation y*_t = log( u_t' Sigma_u^{-1} u_t / ny ).
-    2. Sample mixture indicators s_t in {0..6} (KSC 7-component mixture).
-    3. Sample h_{0:T} jointly via Forward-Filter-Backward-Sampler (FFBS).
-    4. Sample sigma_h^2 from its conjugate Inverse-Gamma posterior.
+Here we replace both KSC and FFBS with the simplest correct sampler in
+the SV literature: single-site Metropolis-Hastings on each h_t, following
+Jacquier-Polson-Rossi (1994).  Each h_t is updated independently using
+ONLY its Markov blanket (h_{t-1}, h_{t+1}, q_t).  No Kalman recursions,
+no auxiliary mixture, no backward sweep.  If anything goes wrong, the
+problem is local to that single update.
+
+Gibbs sweep (one call to step6_sample_SV):
+    1. Compute q_t = u_t' Sigma_u^{-1} u_t                (Mahalanobis sum)
+    2. Single-site MH update of h_{0:T-1}                 (the volatility path)
+    3. Adaptive proposal scaling during burn-in           (Roberts-Rosenthal)
+    4. Conjugate Inverse-Gamma update of sigma_h^2
 """
 from __future__ import annotations
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 
 
-# ==========================================================================
-# Kim-Shephard-Chib (1998) 7-component normal-mixture approximation of
-# log(chi^2_1). These constants are FIXED -- do not retune.
-# ==========================================================================
-_KSC_PROB = np.array([0.00730, 0.10556, 0.00002, 0.04395,
-                      0.34001, 0.24566, 0.25750])
-_KSC_MEAN = np.array([-10.12999, -3.97281, -8.56686,  2.77786,
-                       0.61942,   1.79518, -1.08819])
-_KSC_VAR  = np.array([5.79596,  2.61369,  5.17950,  0.16735,
-                      0.64009,  0.34023,  1.26261])
-_KSC_LOGPI    = np.log(_KSC_PROB)
-_KSC_LOG_HALF = 0.5 * np.log(2.0 * np.pi)
+# Target acceptance rate for single-site MH on a univariate target.
+# Roberts, Gelman & Gilks (1997) show this is asymptotically optimal.
+_MH_TARGET_ACCEPT = 0.44
+
+# How aggressively we rescale tau when it is off-target during burn-in.
+# Multiplicative step: tau_new = tau_old * exp(+/- _ADAPT_STEP).
+_ADAPT_STEP = 0.05
 
 
 # ==========================================================================
-# Step 6.1 -- pseudo-observation y*_t = log( u_t' Sigma_u^{-1} u_t / ny ).
-# Under the model q_t = u_t' Sigma_u^{-1} u_t  ~  exp(h_t) * chi^2_{ny},
-# so y*_t = h_t + zeta_t with zeta_t = log( chi^2_{ny}/ny ).
-# The KSC 7-mixture approximates the law of zeta_t for ny=1; for ny>1 we
-# treat the Mahalanobis sum as a single noisy observation and rely on the
-# mixture as an approximation (standard practice in multivariate SV).
-# ==========================================================================
-def _build_y_star(U: np.ndarray, Sigma_u_inv: np.ndarray,
-                  offset: float = 1e-6) -> np.ndarray:
-    """y*_t = log( u_t' Sigma_u^{-1} u_t / ny + offset )."""
-    T, ny = U.shape
-    US    = U @ Sigma_u_inv                        # (T, ny)
-    q_t   = np.einsum('ti,ti->t', US, U)           # (T,) Mahalanobis sums
-    return np.log(q_t / ny + offset)
-
-
-# ==========================================================================
-# Step 6.2 -- sample mixture indicators s_t in {0, ..., 6}.
-#   P(s_t = k | y*_t, h_t)  ∝  pi_k * N(y*_t - h_t ; m_k, v_k)
-# Vectorised with the Gumbel-max trick for a single argmax over k.
-# ==========================================================================
-def _sample_indicators(y_star: np.ndarray, h: np.ndarray,
-                       rng: np.random.Generator) -> np.ndarray:
-    e = y_star - h                                              # (T,)
-    log_norm = -_KSC_LOG_HALF - 0.5 * np.log(_KSC_VAR)          # (7,)
-    diff     = e[:, None] - _KSC_MEAN                           # (T, 7)
-    log_lik  = log_norm - 0.5 * diff * diff / _KSC_VAR          # (T, 7)
-    log_w    = _KSC_LOGPI + log_lik                             # (T, 7)
-    g        = -np.log(-np.log(rng.uniform(size=log_w.shape)))  # Gumbel(0,1)
-    return np.argmax(log_w + g, axis=1)
-
-
-# ==========================================================================
-# Step 6.3 -- FFBS for h_{1:T} under the RANDOM WALK transition.
+# Step 6.1 -- log full conditional of a single h_t  (up to additive const).
 #
-# Conditional on s, the state-space is linear-Gaussian:
-#     y*_t  =  h_t + m_{s_t}  +  e_t,    e_t  ~ N(0, v_{s_t})    (observation)
-#     h_t   =  h_{t-1}        +  eta_t,  eta_t ~ N(0, sigma_h^2)  (state, RW)
+# For 1 <= t <= T-2 (interior point) the conditional log-density is:
 #
-# Forward Kalman recursions:
-#     a_pred  = a_filt[t-1]                       (RW: no phi or mu)
-#     P_pred  = P_filt[t-1] + sigma_h^2
-#     F       = P_pred + v_{s_t}
-#     K       = P_pred / F
-#     a_filt  = a_pred + K * (y*_t - m_{s_t} - a_pred)
-#     P_filt  = (1 - K) * P_pred
+#     log pi(h_t | rest) = -(ny/2) * h_t                       # likelihood: det
+#                          - q_t / (2 * exp(h_t))              # likelihood: quad
+#                          - (h_t - h_{t-1})^2 / (2*sigma_h2)  # prior past
+#                          - (h_{t+1} - h_t)^2 / (2*sigma_h2)  # prior future
 #
-# Backward simulation smoother (De Jong-Shephard):
-#     J        = P_filt[t] / (P_filt[t] + sigma_h^2)
-#     mean_bs  = a_filt[t] + J * (h[t+1] - a_filt[t])
-#     var_bs   = (1 - J) * P_filt[t]
-#     h[t]     = mean_bs + sqrt(var_bs) * standard_normal
+# Derivation:
+#   p(u_t | h_t) propto |exp(h_t)*Sigma_u|^{-1/2} * exp(-0.5*q_t/exp(h_t))
+#                 = exp(-0.5*ny*h_t) * exp(-0.5*q_t*exp(-h_t)) * (Sigma_u term)
+#   The Sigma_u term and any constant do not depend on h_t, hence dropped.
+#   The RW prior adds two quadratic terms in h_t (one from h_{t-1} -> h_t,
+#   one from h_t -> h_{t+1}).
 #
-# Initialisation: h_0 has a diffuse prior  h_0 ~ N(0, V_h0).
-# We initialise the filter at t = 0 with a_pred = 0, P_pred = V_h0.
+# Boundary cases:
+#   t = 0    : the "past" term becomes -h_t^2 / (2*V_h0)
+#              (h_0 ~ N(0, V_h0) diffuse prior; no h_{-1} exists)
+#   t = T-1  : the "future" term is absent (no h_T exists)
+#
+# We pass h_prev / h_next as floats with np.nan signalling boundaries.
+# A single function therefore handles all three cases via simple branches.
 # ==========================================================================
-def _ffbs_h_rw(y_star: np.ndarray, s: np.ndarray,
-               sigma_h2: float, V_h0: float,
-               rng: np.random.Generator) -> np.ndarray:
-    T  = y_star.shape[0]
-    ms = _KSC_MEAN[s]
-    vs = _KSC_VAR[s]
+def _log_target_ht(h_t: float,
+                   h_prev: float, h_next: float,
+                   q_t: float, ny: int,
+                   sigma_h2: float, V_h0: float) -> float:
+    # ---- Likelihood contribution ---------------------------------------
+    # q_t is fixed during the MH update (it depends on residuals and
+    # Sigma_u, not on h_t), so we treat it as a constant here.
+    ll = -0.5 * ny * h_t - 0.5 * q_t * np.exp(-h_t)
 
-    a_filt = np.empty(T)
-    P_filt = np.empty(T)
+    # ---- Prior from the past (or diffuse N(0, V_h0) prior at t = 0) ----
+    if np.isnan(h_prev):
+        lp_past = -0.5 * h_t * h_t / V_h0
+    else:
+        d = h_t - h_prev
+        lp_past = -0.5 * d * d / sigma_h2
 
-    # Diffuse prior at t = 0 (no t = -1 needed: a_pred = 0, P_pred = V_h0)
-    a_pred = 0.0
-    P_pred = V_h0
+    # ---- Prior from the future (absent at t = T-1) ---------------------
+    if np.isnan(h_next):
+        lp_fut = 0.0
+    else:
+        d = h_next - h_t
+        lp_fut = -0.5 * d * d / sigma_h2
 
-    # ---- Forward filter ----
+    return ll + lp_past + lp_fut
+
+
+# ==========================================================================
+# Step 6.2 -- one full sweep of single-site MH over h_{0:T-1}.
+#
+# Proposal: symmetric random walk on h_t
+#     h_t* = h_t + tau * N(0, 1)
+# Acceptance ratio (symmetric proposal => no proposal correction):
+#     log r = log pi(h_t*) - log pi(h_t)
+# Accept iff log U < log r, with U ~ Uniform(0, 1).
+#
+# Loop order: t = 0, 1, ..., T-1.  Single-site Gibbs is valid in any order;
+# sequential is cache-friendly and means the update of h_t already sees
+# the newly-accepted h_{t-1} from this sweep, which improves mixing.
+#
+# Returns the updated h array AND the empirical acceptance rate, used by
+# the caller for the burn-in adaptive scaling of tau.
+# ==========================================================================
+def _sample_h_path(h: np.ndarray,
+                   q: np.ndarray,
+                   sigma_h2: float,
+                   V_h0: float,
+                   ny: int,
+                   proposal_sd: float,
+                   rng: np.random.Generator) -> tuple[np.ndarray, float]:
+    T = h.shape[0]
+    h_new = h.copy()                  # rejected proposals must leave h_t unchanged
+    n_accept = 0
+
+    # Pre-draw all random numbers in one shot (numpy vectorised RNG is much
+    # faster than calling rng inside the Python loop).
+    z_all = rng.standard_normal(T) * proposal_sd      # MH proposal noise
+    log_u = np.log(rng.uniform(size=T))               # log of acceptance uniforms
+
     for t in range(T):
-        if t > 0:
-            a_pred = a_filt[t - 1]                # RW: predicted mean = previous filtered mean
-            P_pred = P_filt[t - 1] + sigma_h2     # RW: predicted variance grows by sigma_h^2
-        F = P_pred + vs[t]
-        K = P_pred / F
-        innov = (y_star[t] - ms[t]) - a_pred
-        a_filt[t] = a_pred + K * innov
-        P_filt[t] = (1.0 - K) * P_pred
+        # Identify Markov-blanket neighbours; NaN signals a boundary.
+        h_prev = h_new[t - 1] if t > 0       else np.nan
+        h_next = h_new[t + 1] if t < T - 1   else np.nan
 
-    # ---- Backward simulation smoother ----
-    h = np.empty(T)
-    h[-1] = a_filt[-1] + np.sqrt(P_filt[-1]) * rng.standard_normal()
-    for t in range(T - 2, -1, -1):
-        # Under RW, the smoother gain simplifies (no phi factor):
-        #   P_pred(t+1 | t) = P_filt[t] + sigma_h^2
-        #   J               = P_filt[t] / P_pred(t+1 | t)
-        denom = P_filt[t] + sigma_h2
-        J     = P_filt[t] / denom
-        mean_bs = a_filt[t] + J * (h[t + 1] - a_filt[t])
-        var_bs  = max((1.0 - J) * P_filt[t], 0.0)
-        h[t]    = mean_bs + np.sqrt(var_bs) * rng.standard_normal()
-    return h
+        h_old  = h_new[t]
+        h_prop = h_old + z_all[t]
+
+        log_pi_old = _log_target_ht(h_old,  h_prev, h_next,
+                                    q[t], ny, sigma_h2, V_h0)
+        log_pi_new = _log_target_ht(h_prop, h_prev, h_next,
+                                    q[t], ny, sigma_h2, V_h0)
+
+        if log_u[t] < (log_pi_new - log_pi_old):
+            h_new[t]  = h_prop
+            n_accept += 1
+        # else: keep h_old (already stored in h_new[t])
+
+    return h_new, n_accept / T
 
 
 # ==========================================================================
-# Step 6.4 -- conjugate Inverse-Gamma update for sigma_h^2.
+# Step 6.3 -- conjugate Inverse-Gamma update for sigma_h^2.
 #
-# Random walk: eta_t = h_t - h_{t-1}  ~  N(0, sigma_h^2)  for t = 1..T-1.
-# (We do NOT include t = 0 in the sum because h_0 is governed by its own
-#  diffuse prior, not by sigma_h^2.)
+# Under the RW prior, eta_t = h_t - h_{t-1} ~ N(0, sigma_h^2) for t = 1..T-1.
+# We do NOT include t = 0 in the sum because h_0 is governed by its own
+# N(0, V_h0) diffuse prior, not by sigma_h^2.
 #
-# With prior sigma_h^2 ~ IG(shape0, scale0):
-#     posterior shape = shape0 + (T-1)/2
-#     posterior scale = scale0 + 0.5 * sum_t eta_t^2
+# Prior:     sigma_h^2 ~ IG(shape0, scale0)
+# Posterior: shape_post = shape0 + (T - 1) / 2
+#            scale_post = scale0 + 0.5 * sum_t eta_t^2
+#
+# Sampling trick: if X ~ Gamma(shape_post, 1) then 1/X ~ IG(shape_post, 1),
+# so sigma_h^2 = scale_post / X gives the desired IG draw.
 # ==========================================================================
 def _sample_sigma_h2(h: np.ndarray,
                      sigma_prior: dict,
                      rng: np.random.Generator) -> float:
-    eta = np.diff(h)                                       # (T-1,)  RW innovations
+    eta = np.diff(h)                                       # (T-1,) RW innovations
     post_shape = sigma_prior['shape'] + 0.5 * eta.shape[0]
     post_scale = sigma_prior['scale'] + 0.5 * float(eta @ eta)
     return post_scale / rng.standard_gamma(post_shape)
@@ -161,54 +179,83 @@ def _sample_sigma_h2(h: np.ndarray,
 # ==========================================================================
 def step6_sample_SV(state: dict, rng: np.random.Generator) -> dict:
     """
-    One Gibbs sweep over the random-walk stochastic-volatility block:
-        1. y*_t            (pseudo-observation built from current residuals)
-        2. s_t             (mixture indicator, KSC 7-component)
-        3. h_{1:T}         (FFBS under RW transition)
-        4. sigma_h^2       (conjugate IG update)
+    One Gibbs sweep over the random-walk stochastic-volatility block.
 
-    Writes back into `state`:  h, sigma_h2 (and lambda_t = 1 for compat).
+    Pipeline:
+        1. Recompute residuals u_t from current Phi / Gamma.
+        2. Form q_t = u_t' Sigma_u^{-1} u_t.
+        3. Single-site MH sweep updating h_{0:T-1}.
+        4. (Burn-in only) Adapt the MH proposal SD to target ~44% accept.
+        5. Conjugate IG update of sigma_h^2.
+
+    Reads from / writes to `state`:
+        h         : (T,) log-volatility path
+        sigma_h2  : float, RW innovation variance
+        sv_propsd : float, MH proposal SD (adaptive during burn-in)
+        sv_iter   : int, Gibbs iteration counter (used to freeze adaptation)
+        lambda_t  : (T,) array of ones, kept ONLY for backward compatibility
+                    with step3 / step4 which still multiply by sqrt(lam).
     """
-    from step3 import compute_residuals             # lazy import
+    from step3 import compute_residuals             # lazy import (avoid circular dep)
 
+    # ---- Unpack state ---------------------------------------------------
     ny       = state['ny']
     Sigma_u  = state['Sigma_u']
     h        = state['h']
     sigma_h2 = float(state['sigma_h2'])
 
     sigma_prior = state['sigma_prior_sv']
-    # Diffuse prior variance on h_0 (read from state if present, else 10).
-    V_h0 = float(state.get('V_h0', 10.0))
+    V_h0        = float(state.get('V_h0', 10.0))
 
-    # Pre-compute Sigma_u^{-1} once for y* this iteration.
+    # Adaptive MH bookkeeping.  Both fields are created on first call.
+    proposal_sd = float(state.get('sv_propsd', 0.20))   # sensible default
+    sv_iter     = int(state.get('sv_iter', 0))
+    burnin      = int(state.get('BURNIN_for_SV', 1000)) # adapt only up to this iter
+
+    # ---- 1. Mahalanobis sums q_t ---------------------------------------
+    # Cholesky-factor Sigma_u once, invert, symmetrise for numerical safety.
     cho, low = cho_factor(Sigma_u, lower=True, check_finite=False)
     Sigma_u_inv = cho_solve((cho, low), np.eye(ny), check_finite=False)
     Sigma_u_inv = 0.5 * (Sigma_u_inv + Sigma_u_inv.T)
 
-    # Fresh residuals from the current Phi / G_Phi.
-    U = compute_residuals(state)
+    U = compute_residuals(state)                           # (T, ny)
+    US = U @ Sigma_u_inv                                   # (T, ny)
+    q = np.einsum('ti,ti->t', US, U)                       # (T,)
+    # Numerical floor: q_t cannot be exactly zero or negative due to roundoff.
+    q = np.maximum(q, 1e-12)
 
-    # ---- 1. pseudo-observation ----
-    y_star = _build_y_star(U, Sigma_u_inv)
+    # ---- 2. Single-site MH sweep over h --------------------------------
+    h_new, accept_rate = _sample_h_path(h, q, sigma_h2, V_h0,
+                                        ny, proposal_sd, rng)
 
-    # ---- 2. mixture indicators ----
-    s = _sample_indicators(y_star, h, rng)
+    # ---- 3. Adaptive scaling (burn-in only, then frozen) ---------------
+    # Move tau toward the value that yields ~44% acceptance.
+    # If accept too high  -> proposals too small -> increase tau.
+    # If accept too low   -> proposals too large -> decrease tau.
+    if sv_iter < burnin:
+        if accept_rate > _MH_TARGET_ACCEPT:
+            proposal_sd *= np.exp(_ADAPT_STEP)
+        else:
+            proposal_sd *= np.exp(-_ADAPT_STEP)
+        # Safety bounds (avoid pathological collapse or runaway).
+        proposal_sd = float(np.clip(proposal_sd, 1e-3, 5.0))
 
-    # ---- 3. h_{1:T} via FFBS under RW transition ----
-    h = _ffbs_h_rw(y_star, s, sigma_h2, V_h0, rng)
+    # ---- 4. Conjugate IG update for sigma_h^2 --------------------------
+    sigma_h2_new = _sample_sigma_h2(h_new, sigma_prior, rng)
 
-    # ---- 4. sigma_h^2 (conjugate IG) ----
-    sigma_h2 = _sample_sigma_h2(h, sigma_prior, rng)
-
-    # ---- Write back into state ----
-    state['h']        = h
-    state['sigma_h2'] = sigma_h2
-    # Lambda mixing is disabled in this RW-SV version. Keep lambda_t = 1
-    # so that step3 / step4 (which scale by sqrt(exp(h) * lam)) still work.
-    state['lambda_t'] = np.ones_like(h)
+    # ---- 5. Write back into state --------------------------------------
+    state['h']         = h_new
+    state['sigma_h2']  = sigma_h2_new
+    state['sv_propsd'] = proposal_sd
+    state['sv_iter']   = sv_iter + 1
+    # lambda_t kept at 1 so that step3 / step4's   sqrt(exp(h) * lam)
+    # rescaling reduces cleanly to   exp(h/2)   in this SV-only version.
+    state['lambda_t']  = np.ones_like(h_new)
 
     return {
-        'h_mean':   float(h.mean()),
-        'h_std':    float(h.std()),
-        'sigma_h2': sigma_h2,
+        'h_mean':      float(h_new.mean()),
+        'h_std':       float(h_new.std()),
+        'sigma_h2':    float(sigma_h2_new),
+        'accept_rate': float(accept_rate),
+        'proposal_sd': float(proposal_sd),
     }

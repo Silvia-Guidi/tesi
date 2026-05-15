@@ -137,7 +137,7 @@ def build_phi_weight_matrices(chain: ChainOutput,
     Self-loops (i == j) are preserved (they represent autoregression).
     """
     # Posterior mean across the chain dimension (axis 3)
-    phi_mean = chain.Phi_samples.mean(axis=3)   # (ny, ny, n_lags)
+    phi_mean = chain.Phi_eff.mean(axis=3)   # (ny, ny, n_lags)
     weights_abs = np.abs(phi_mean)               # absolute value
 
     # Apply threshold (optional noise suppression)

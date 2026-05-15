@@ -148,7 +148,7 @@ def build_gamma_weight_matrices(chain: ChainOutput,
             "Chain has no Gamma samples. Make sure step5 was run and "
             "Gamma_samples.npy / G_Gamma_samples.npy are present."
         )
-    gamma_mean = chain.Gamma_samples.mean(axis=3)   # (ny, nx, n_lags)
+    gamma_mean = chain.Gamma_eff.mean(axis=3)   # (ny, nx, n_lags)
     weights_abs = np.abs(gamma_mean)
 
     if threshold > 0:

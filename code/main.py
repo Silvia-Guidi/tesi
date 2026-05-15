@@ -18,10 +18,12 @@ DATA_DIR    = Path("data")
 NETWORK_DIR = Path("data/network_data")
 OUTPUT_DIR  = Path("outputs")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+N_CHAINS = 4          
+BASE_SEED = 42
 
 # Gibbs sampler settings
 N_ITER           = 20000        # total iterations
-BURNIN           = 10000        # burn-in iterations to discard
+BURNIN           = 15000        # burn-in iterations to discard
 N_KEEP           = N_ITER - BURNIN
 CHECKPOINT_EVERY = 2000        # flush partial samples to disk every N iterations
 
@@ -45,12 +47,9 @@ HPARAMS = {
 
     # Stochastic volatility prior
     'stochastic_volatility': {
-        'phi_a':   20,       # non più usato (RW)
-        'phi_b':   1.5,      # non più usato
-        'mu_0':    0.0,      # non più usato
-        'mu_var':  10.0,     # non più usato
-        'sigma_v': 20.0,     # nu_h = 10  → shape = 10
-        'sigma_s': 0.18,     # S_h = 0.09 → scale = 0.09
+        'shape': 10,        # nu_h prior shape
+        'scale': 0.01,      # S_h   prior scale  
+        'sv_burnin_adapt': BURNIN,
     },
 
     # Degrees-of-freedom prior for lambda_t
@@ -154,10 +153,6 @@ def allocate_storage(ny: int, nz: int, n_lags: int, n_lags_exo: int, T_eff: int)
         # Step 6: stochastic volatility + Student-t mixing
         'h':            np.zeros((T_eff, N_KEEP), dtype=np.float32),
         'lambda_t':     np.zeros((T_eff, N_KEEP), dtype=np.float32),
-        
-        # Scalar AR(1) hyper-parameters: one value per kept iteration
-        'mu_h':         np.zeros(N_KEEP, dtype=np.float32),
-        'phi_h':        np.zeros(N_KEEP, dtype=np.float32),
         'sigma_h2':     np.zeros(N_KEEP, dtype=np.float32),
     }
 
@@ -172,45 +167,43 @@ def save_samples(samples: dict, out_dir: Path, tag: str = "") -> None:
 # --------------------------------------------------------
 # MAIN
 # --------------------------------------------------------
-def main():
-    print("=" * 60)
-    print("BGVAR MODEL — GIBBS SAMPLER")
-    print("=" * 60)
+def run_one_chain(chain_id: int, seed: int,
+                  y_raw, X_exo_raw, endo_names, exo_names):
+    """Run one independent Gibbs chain and save its samples to a
+    dedicated sub-directory outputs/chain_<id>/."""
 
-    rng = np.random.default_rng(SEED)
+    print(f"\n{'='*60}\nCHAIN {chain_id}  (seed={seed})\n{'='*60}")
 
-    # --- Data and initial state ---
-    y_raw, X_exo_raw, endo_names, exo_names = load_data()
+    rng = np.random.default_rng(seed)          # <-- per-chain seed
+
+    # --- Initial state (re-initialised independently per chain) ---
     state = initialize_model(
         y_raw         = y_raw,
-        X_exo_raw     = X_exo_raw,         # nuovo argomento
+        X_exo_raw     = X_exo_raw,
         selected_lags = SELECTED_LAGS,
         hparams       = HPARAMS,
         rng           = rng,
     )
     state['endo_names'] = endo_names
     state['exo_names']  = exo_names
+    state['hparams']    = HPARAMS
 
-    # Make hparams accessible to step3 (it reads state['hparams'])
-    state['hparams'] = HPARAMS
+    ny, nz       = state['ny'], state['nz']
+    T            = state['T']
+    n_lags       = state['n_lags']
+    n_lags_exo   = state['n_lags_exo']
 
-    ny     = state['ny']
-    nz     = state['nz']
-    T      = state['T']
-    n_lags = state['n_lags']
-    n_lags_exo = state['n_lags_exo']
+    # --- Per-chain output directory ---
+    chain_dir = OUTPUT_DIR / f"chain_{chain_id}"
+    chain_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"[Init] ny={ny} variables, T={T} effective observations, n_lags={n_lags}")
-    print(f"[Init] G0_expanded active arcs: {int(state['G0_expanded'].sum())}")
-    print()
+    print(f"[Init] G0_expanded active arcs: {int(state['G0_expanded'].sum())}\n")
 
-    # Save the physical-network mask once (it never changes)
-    np.save(OUTPUT_DIR / "G0_expanded.npy", state['G0_expanded'].astype(np.uint8))
+    np.save(chain_dir / "G0_expanded.npy", state['G0_expanded'].astype(np.uint8))
 
-    # --- Allocate sample storage ---
     samples = allocate_storage(ny, nz, n_lags, n_lags_exo, T)
 
-    # --- Gibbs loop ---
     print(f"Running {N_ITER} iterations ({BURNIN} burn-in + {N_KEEP} kept)...\n")
     t_start = time.perf_counter()
 
@@ -266,23 +259,43 @@ def main():
                 f"n_active={diag2['n_active']:>4}  "
                 f"logdet(Σ)={diag3['logdet_Sigma']:+.2f}  "
                 f"S4 |Φ|_F={diag4['phi_norm']:.3f}  "
-                f"S4 max|Φ|={diag4['phi_max_abs']:.3f}"
+                f"S4 max|Φ|={diag4['phi_max_abs']:.3f}  "
                 f"⟨h⟩={diag6['h_mean']:+.2f}  "
-                #f"φ_h={diag6['phi_h']:.3f}  "
                 f"σ_h²={diag6['sigma_h2']:.4f}  "
-                #f"⟨λ⟩={diag6['lambda_mean']:.2f}"
+                f"acc6={diag6['accept_rate']:.2%}  "
+                f"τ={diag6['proposal_sd']:.3f}"
             )
 
         # --- Periodic checkpoint (only after burn-in, while we have real samples) ---
         if (t >= BURNIN) and ((t + 1) % CHECKPOINT_EVERY == 0):
             save_samples(samples, OUTPUT_DIR, tag="partial")
 
-    # --- Final save ---
-    save_samples(samples, OUTPUT_DIR)
+    save_samples(samples, chain_dir)
     total = time.perf_counter() - t_start
-    print(f"\nGibbs sampler complete in {total:.1f}s "
-          f"({total / N_ITER * 1000:.1f} ms/iter).")
-    print(f"[Output] Saved to {OUTPUT_DIR}/")
+    print(f"\n[chain {chain_id}] complete in {total:.1f}s "
+          f"({total / N_ITER * 1000:.1f} ms/iter). Saved to {chain_dir}/")
+
+def main():
+    print("=" * 60)
+    print(f"BGVAR MODEL — GIBBS SAMPLER ({N_CHAINS} chains)")
+    print("=" * 60)
+
+    # Load the data ONCE — it is identical across chains, so there is
+    # no reason to read the parquet files four times.
+    y_raw, X_exo_raw, endo_names, exo_names = load_data()
+
+    for c in range(N_CHAINS):
+        run_one_chain(
+            chain_id   = c,
+            seed       = BASE_SEED + c,
+            y_raw      = y_raw,
+            X_exo_raw  = X_exo_raw,
+            endo_names = endo_names,
+            exo_names  = exo_names,
+        )
+
+    print(f"\nAll {N_CHAINS} chains complete. "
+          f"Outputs in {OUTPUT_DIR}/chain_0 … chain_{N_CHAINS-1}/")
 
 
 if __name__ == "__main__":

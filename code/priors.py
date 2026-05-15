@@ -48,30 +48,32 @@ def bernoulli_prior(hparams):
 
 
 def stochastic_volatility_prior(hparams):
+    """
+    Random-walk SV prior (Gianfreda-Ravazzolo-Rossini 2023 style):
+        h_t = h_{t-1} + eta_t,   eta_t ~ N(0, sigma_h^2)
+        sigma_h^2 ~ IG(shape, scale)
+        h_0 ~ N(0, V_h0)
+
+    No AR(1) drift (mu_h) and no persistence (phi_h): the level is
+    anchored only by the diffuse prior on h_0 and by the data.
+
+    Returns
+    -------
+    sigma_prior : dict with keys 'shape' and 'scale' for sigma_h^2 ~ IG.
+    h_init      : float, initial value for h_t (0 = neutral level).
+    """
     sv_params = hparams['stochastic_volatility']
-    
+
     # --- validation ---
-    assert sv_params['phi_a'] > 0 and sv_params['phi_b'] > 0, \
-    "phi_a and phi_b must be positive"
-    # --- 
-    
-    # phi_h ~ Beta(a, b)
-    phi_prior = {
-        'a': sv_params['phi_a'],
-        'b': sv_params['phi_b']
-    }
-    # mu_h~ N(mu_0, V_mu)
-    mu_prior = {
-        'mean': sv_params['mu_0'],
-        'var': sv_params['mu_var']
-    }
-    # sigma_h^2 ~ IG(v/2, S/2)
+    assert sv_params['shape'] > 0, "IG shape must be positive"
+    assert sv_params['scale'] > 0, "IG scale must be positive"
+
     sigma_prior = {
-        'shape': sv_params['sigma_v']/2,
-        'scale' : sv_params['sigma_s']/2
+        'shape': sv_params['shape'],
+        'scale': sv_params['scale'],
     }
     h_init = 0.0
-    return phi_prior, mu_prior, sigma_prior, h_init
+    return sigma_prior, h_init
 
 def ar1_residual_variances(y_raw, max_lag):
     """
