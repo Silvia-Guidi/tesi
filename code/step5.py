@@ -54,14 +54,12 @@ def step5_sample_Gamma(state: dict, rng: Generator) -> dict:
     # --- Partial residuals: subtract the endogenous fitted part --------------
     tildeY = Y - _endo_fitted(X_endo, state['Phi'], ny, n_lags)     # (T, ny)
     
-    # --- Optional SV / Student-t rescaling -----------------------------------
+    # ---  SV rescaling -----------------------------------
     h   = state.get('h', None)
-    lam = state.get('lambda_t', None)
-    if h is not None or lam is not None:
+    if h is not None:
         T = state['T']
         h_arr   = h   if h   is not None else np.zeros(T)
-        lam_arr = lam if lam is not None else np.ones(T)
-        scale = np.sqrt(np.exp(h_arr) * lam_arr)[:, None]   # (T, 1)
+        scale = np.sqrt(np.exp(h_arr))[:, None]   # (T, 1)
         Yt = tildeY / scale
         Xt = X_exo  / scale
     else:

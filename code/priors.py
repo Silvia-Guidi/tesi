@@ -1,5 +1,4 @@
 import numpy as np
-from numpy.linalg import lstsq
 
 
 def minnesota_prior(n_endo, n_exo, n_lags_endo, n_lags_exo, hparams, selected_lags=None):
@@ -97,30 +96,3 @@ def ar1_residual_variances(y_raw, max_lag):
 
     resid = Y_dep - (a + b * Y_lag)
     return resid.var(axis=0)
-
-
-def df_prior(hparams):
-    df_params = hparams['degrees_of_freedom']
-    
-    # --- validation ---
-    assert df_params['min_nu'] >= 2,  "min_nu must be >= 2 (finite variance)"
-    assert df_params['max_nu'] > df_params['min_nu'], "max_nu must be > min_nu"
-    assert df_params['initial_nu'] >= df_params['min_nu'], "initial_nu out of range"
-    # ---
-    
-    nu_prior = {
-        'low': df_params['min_nu'], 
-        'high': df_params['max_nu']
-    }
-    nu_init = df_params['initial_nu']
-    
-    return nu_prior, nu_init
-
-
-def global_shrinkage_prior(nu):
-    lambda_prior = {
-        'alpha': nu/2,
-        'beta': nu/2
-    }
-    lambda_init = 1
-    return lambda_prior, lambda_init

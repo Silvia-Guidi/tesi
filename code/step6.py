@@ -193,8 +193,6 @@ def step6_sample_SV(state: dict, rng: np.random.Generator) -> dict:
         sigma_h2  : float, RW innovation variance
         sv_propsd : float, MH proposal SD (adaptive during burn-in)
         sv_iter   : int, Gibbs iteration counter (used to freeze adaptation)
-        lambda_t  : (T,) array of ones, kept ONLY for backward compatibility
-                    with step3 / step4 which still multiply by sqrt(lam).
     """
     from step3 import compute_residuals             # lazy import (avoid circular dep)
 
@@ -248,9 +246,6 @@ def step6_sample_SV(state: dict, rng: np.random.Generator) -> dict:
     state['sigma_h2']  = sigma_h2_new
     state['sv_propsd'] = proposal_sd
     state['sv_iter']   = sv_iter + 1
-    # lambda_t kept at 1 so that step3 / step4's   sqrt(exp(h) * lam)
-    # rescaling reduces cleanly to   exp(h/2)   in this SV-only version.
-    state['lambda_t']  = np.ones_like(h_new)
 
     return {
         'h_mean':      float(h_new.mean()),

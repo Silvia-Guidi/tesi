@@ -122,27 +122,21 @@ def compute_residuals(state: dict) -> np.ndarray:
 
 # ---
 # Standardise residuals by stochastic-volatility scaling factors:
-#     u_tilde_t = u_t / sqrt(exp(h_t) * lambda_t)
-# Fast path when SV (step 6) is not yet active: scale is identically 1,
-# so we skip the exp/sqrt/division entirely.
+#     u_tilde_t = u_t / sqrt(exp(h_t))
 # ---
 def standardise_residuals(U: np.ndarray, state: dict) -> np.ndarray:
     h   = state.get('h')
-    lam = state.get('lambda_t')
 
     # Fast path: step 6 not yet implemented -> identity scaling
-    if h is None and lam is None:
+    if h is None:
         return U
 
     T = U.shape[0]
     if h is None:
         h = np.zeros(T)
-    if lam is None:
-        lam = np.ones(T)
 
-    # sqrt(exp(h) * lam) = exp(h/2) * sqrt(lam)
-    # Two cheap elementwise ops instead of one exp + one multiply + one sqrt.
-    scale = np.exp(0.5 * h) * np.sqrt(lam)
+    # sqrt(exp(h)) = exp(h/2) 
+    scale = np.exp(0.5 * h)
     return U / scale[:, None]
 
 

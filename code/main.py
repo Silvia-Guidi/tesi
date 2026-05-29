@@ -31,6 +31,8 @@ SEED = 42
 
 # Model settings
 SELECTED_LAGS = [1, 7]
+DATA_MODE = "all"            # endogenous: "prices_only" | "all"
+EXO_SUFFIXES: list[str] = ["wind", "solar"]   # empty list = no exogenous
 
 HPARAMS = {
     # Minnesota prior
@@ -51,17 +53,8 @@ HPARAMS = {
         'scale': 0.01,      # S_h   prior scale  
         'sv_burnin_adapt': BURNIN,
     },
-
-    # Degrees-of-freedom prior for lambda_t
-    'degrees_of_freedom': {
-        'min_nu':     2,
-        'max_nu':     40,
-        'initial_nu': 10,
-    },
 }
 
-DATA_MODE = "prices_only"            # endogenous: "prices_only" | "all"
-EXO_SUFFIXES: list[str] = ["wind", "solar"]   # empty list = no exogenous
 
 def load_data() -> tuple[np.ndarray, np.ndarray | None, list[str], list[str]]:
     """
@@ -83,7 +76,7 @@ def load_data() -> tuple[np.ndarray, np.ndarray | None, list[str], list[str]]:
     Y_df = Y_df[endo_cols]
     print(f"[Data] Endo selection: {len(endo_cols)} variables")
 
-    # --- Exogenous (optional) ---
+    # --- Exogenous ---
     X_path = DATA_DIR / "X.parquet"
     if X_path.exists() and EXO_SUFFIXES:
         X_df = pd.read_parquet(X_path)
@@ -150,9 +143,8 @@ def allocate_storage(ny: int, nz: int, n_lags: int, n_lags_exo: int, T_eff: int)
         'Gamma' :    np.zeros((ny, nz, n_lags_exo, N_KEEP)),
         'gamma_norm':  np.zeros(N_KEEP), 
 
-        # Step 6: stochastic volatility + Student-t mixing
+        # Step 6: stochastic volatility 
         'h':            np.zeros((T_eff, N_KEEP), dtype=np.float32),
-        'lambda_t':     np.zeros((T_eff, N_KEEP), dtype=np.float32),
         'sigma_h2':     np.zeros(N_KEEP, dtype=np.float32),
     }
 
@@ -242,9 +234,6 @@ def run_one_chain(chain_id: int, seed: int,
             samples['Gamma'][:, :, :, k] = np.stack(state['Gamma'], axis=-1)
             samples['gamma_norm'][k]     = diag5['gamma_norm']
             samples['h'][:, k]               = state['h']
-            #samples['lambda_t'][:, k]        = state['lambda_t']
-            #samples['mu_h'][k]               = state['mu_h']
-            #samples['phi_h'][k]              = state['phi_h']
             samples['sigma_h2'][k]           = state['sigma_h2']
             
 

@@ -6,8 +6,6 @@ from priors import (
     inverse_wishart_prior,
     bernoulli_prior,
     stochastic_volatility_prior,
-    df_prior,
-    global_shrinkage_prior, 
     ar1_residual_variances
 )
 
@@ -99,12 +97,6 @@ def initialize_model (
     # --- Stochastic volatility priors ---
     sigma_prior_sv, h_init = stochastic_volatility_prior(hparams)
     
-    #--- Degrees-of-freedom prior for λ_t ---
-    nu_prior, nu_init = df_prior(hparams)
-    
-    # --- Global shrinkage prior for λ_t given ν ---
-    lambda_prior, lambda_init = global_shrinkage_prior(nu_init)
-    
     
     # 4. GRAPH INIT
     def expand_G0(G0_matrix: np.ndarray, n_vars: int = 1) -> np.ndarray:
@@ -160,7 +152,6 @@ def initialize_model (
     # 7. STOCHASTIC VOLATILITY INIT
     h = np.full(T, h_init)
     
-    
     # sigma_h2 : variance of log-vol innovations
     #            initialized to prior mean of IG: E[IG(shape,scale)] = scale/(shape-1)
     if sigma_prior_sv['shape'] > 1:
@@ -168,15 +159,9 @@ def initialize_model (
     else:
         sigma_h2 = sigma_prior_sv['scale'] / (sigma_prior_sv['shape'] + 1)
     assert sigma_h2 > 0, f"sigma_h2 must be positive, got {sigma_h2}"
+
     
-    
-    # 8. STUDENT-t MIXING VAR INIT
-    lambda_t = np.ones(T)
-    
-    nu = float(nu_init)
-    
-    
-    # 9. STATE DICT
+    # 8. STATE DICT
     
     state = {
         # --- Dimentions ---
@@ -216,10 +201,6 @@ def initialize_model (
         'sv_iter':        0,
         'BURNIN_for_SV':  hparams.get('sv_burnin_adapt', 1000), 
  
-        # -- Student-t mixing ---
-        'lambda_t':       lambda_t, 
-        'nu':             nu,
- 
         # -- Priors ---
         'B_phi':          B_phi,
         'Omega_phi':      Omega_phi,
@@ -228,8 +209,6 @@ def initialize_model (
         'alpha_prior':    alpha_prior,
         'pi_bernoulli':   pi_bernoulli,
         'sigma_prior_sv': sigma_prior_sv,
-        'nu_prior':       nu_prior,
-        'lambda_prior':   lambda_prior
     }
  
     return state

@@ -25,7 +25,7 @@ DATA_DIR = Path(__file__).parent
 FILE_MAP = {
     "gen"     : DATA_DIR / "gen_data"              / "energy_pivot.xlsx",
     "load"    : DATA_DIR / "load_data"             / "load_pivot.xlsx",
-    "price"   : DATA_DIR / "price_data"            / "prices_pivot.xlsx",
+    "price"   : DATA_DIR / "price_data"            / "prices_pivot_2025.xlsx",
     "reserve" : DATA_DIR / "reserve_margin_data"   / "reserve_margin_data.xlsx",
 }
 

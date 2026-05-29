@@ -35,14 +35,12 @@ def step4_sample_Phi(state: dict, rng: Generator) -> dict:
     # Stack G_Phi once for fast row slicing below
     G_stack = _stack_G_Phi(state['G_Phi'], ny, n_lags)    # (ny, ny*p)
 
-    # --- Optional SV / Student-t rescaling ---------------------------.
+    # ---  SV rescaling ---------------------------.
     h = state.get('h', None)
-    lam = state.get('lambda_t', None)
-    if h is not None or lam is not None:
+    if h is not None :
         T = state['T']
         h_arr = h if h is not None else np.zeros(T)
-        lam_arr = lam if lam is not None else np.ones(T)
-        scale = np.sqrt(np.exp(h_arr) * lam_arr)[:, None]    # (T, 1)
+        scale = np.sqrt(np.exp(h_arr))[:, None]    # (T, 1)
         Y_t = Y / scale
         X_t = X / scale
     else:
